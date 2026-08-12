@@ -1,0 +1,36 @@
+# --- Flutter / Dart ---------------------------------------------------------
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+pubspec.lock
+
+# --- Windows ----------------------------------------------------------------
+windows/flutter/ephemeral/
+windows/flutter/generated_plugin_registrant.cc
+windows/flutter/generated_plugin_registrant.h
+windows/flutter/generated_plugins.cmake
+
+# --- Sidecars ---------------------------------------------------------------
+# yt-dlp se baja en cada empaquetado, no se versiona (YouTube le rompe los
+# extractores cada pocas semanas). En Linux no lleva extension, asi que el
+# *.exe de mas abajo no lo cubre.
+tool/ytdlp-build/
+*.exe
+
+# --- Salidas ----------------------------------------------------------------
+dist/
+
+# --- Entorno ----------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+*.log
+
+# --- Nada de credenciales ---------------------------------------------------
+# Las cookies de la sesion de YouTube viven en el directorio de datos del
+# usuario, nunca en el arbol.
+*.cookies
+config.json

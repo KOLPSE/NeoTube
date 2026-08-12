@@ -1,0 +1,43 @@
+name: neotube
+description: "Cliente nativo de YouTube Music para escritorio (Flutter + media_kit + yt-dlp)"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+# Dependencias deliberadamente minimas: cada paquete es RAM y superficie de
+# fallo. El estado se lleva con ChangeNotifier/ValueNotifier, sin gestor
+# externo. Heredado de NeoFy, de donde sale este codigo.
+dependencies:
+  flutter:
+    sdk: flutter
+  http: ^1.2.0
+  # Firma SAPISIDHASH de la API interna (core/yt_auth.dart) y nombre de los
+  # ficheros de la cache de caratulas (core/art_cache.dart).
+  crypto: ^3.0.3
+  path: ^1.9.0
+  window_manager: ^0.4.2
+  tray_manager: ^0.2.3
+  url_launcher: ^6.3.0
+  ffi: ^2.2.0
+  # Solo en Linux, para hablar MPRIS con el escritorio. Es Dart puro, sin
+  # transitivas nativas. Ver "La capa de escritorio no viene" en CONTEXTO.md:
+  # el fichero core/mpris.dart todavia no esta en este arbol.
+  dbus: ^0.7.10
+  # El reproductor de verdad: envuelve libmpv, soporta Windows y Linux sin
+  # trabajo aparte y reproduce URLs de streaming directamente sin arrastrar
+  # nada de video. yt-dlp resuelve la URL; media_kit la suena.
+  media_kit: ^1.2.6
+  media_kit_libs_windows_audio: ^1.0.9
+  media_kit_libs_linux: ^1.2.1
+  # El login es una WebView de verdad: Google no da API de terceros y hay que
+  # quedarse con las cookies de una sesion real.
+  desktop_webview_window: ^0.3.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

@@ -19,3 +19,24 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---------------------------------------------------------------------------
+Componentes de terceros
+---------------------------------------------------------------------------
+
+Los artefactos de NeoTube distribuyen o dependen de:
+
+  yt-dlp — https://github.com/yt-dlp/yt-dlp
+  Dominio publico (The Unlicense). Se empaqueta sin modificar.
+
+  mpv / libmpv — https://mpv.io
+  LGPL v2.1 o posterior. No se empaqueta: se carga del sistema en tiempo de
+  ejecucion a traves de media_kit (en Windows viaja la libmpv-2.dll que
+  distribuye el propio media_kit).
+
+NeoTube no esta afiliado, asociado, autorizado ni patrocinado por Google LLC
+ni por YouTube, ni tiene relacion oficial alguna con ellas. "YouTube" y
+"YouTube Music" son marcas registradas de Google LLC. Este proyecto se
+comunica con los servicios de YouTube Music usando la sesion del propio
+usuario; los logotipos y demas marcas de Google y YouTube no se reproducen
+en el.
