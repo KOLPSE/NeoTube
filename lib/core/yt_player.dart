@@ -57,13 +57,19 @@ class YtPlayer extends ChangeNotifier {
     // abrir la primera pista se oiría como un salto de volumen a mitad de la
     // primera nota.
     unawaited(mpv.setVolume(_volumen.value.toDouble()));
-    // Cuando una pista termina sola, sigue la cola. `completed` también se
-    // emite al abrir un medio nuevo en algunas versiones, de ahí el control
-    // de que haya sonado algo de verdad y no estemos ya cambiando de pista.
     _subCompletado = mpv.stream.completed.listen((terminada) {
       if (terminada && !_cambiando && cola.isNotEmpty) unawaited(siguiente(automatico: true));
     });
     _subError = mpv.stream.error.listen((e) {
+      if (_pistaAbriendo != null && !_reintentoUsado) {
+        _reintentoUsado = true;
+        final pista = actual;
+        if (pista != null && pista.videoId == _pistaAbriendo) {
+          unawaited(_reintentarConUrlFresca(pista));
+          return; // No se enseña nada todavía: el reintento decide
+        }
+      }
+      _pistaAbriendo = null;
       error = 'Error de reproducción: $e';
       notifyListeners();
     });
@@ -148,6 +154,14 @@ class YtPlayer extends ChangeNotifier {
   String? error;
 
   bool _cambiando = false;
+
+  /// El videoId que se acaba de mandar a abrir y del que aún no hay
+  /// confirmación de que suene: mientras esté puesto, un fallo de [_subError]
+  /// se trata como "no se pudo abrir" (con un reintento silencioso) y no como
+  /// un fallo de reproducción en mitad de una canción que ya sonaba.
+  String? _pistaAbriendo;
+  bool _reintentoUsado = false;
+  Timer? _temporizadorAbriendo;
 
   /// URLs ya resueltas, con su caducidad. Se limita a un puñado: no es una
   /// caché de verdad, es el adelanto de las siguientes pistas.
@@ -394,6 +408,9 @@ class YtPlayer extends ChangeNotifier {
     final t = actual;
     final mpv = _mpv;
     if (t == null || mpv == null) return;
+    _temporizadorAbriendo?.cancel();
+    _pistaAbriendo = t.videoId;
+    _reintentoUsado = false;
     _cambiando = true;
     resolviendo = t.videoId;
     error = null;
@@ -401,27 +418,43 @@ class YtPlayer extends ChangeNotifier {
     try {
       await alEmpezarAReproducir?.call();
       final url = await _resolverUrl(t.videoId);
-      try {
-        await mpv.open(Media(url));
-      } catch (_) {
-        // libmpv no pudo abrir esta URL en concreto (hipo de red, borde de CDN
-        // o bloqueo transitorio de YouTube, no necesariamente que el vídeo
-        // esté roto): se invalida la URL en caché y se pide una fresca a
-        // yt-dlp antes de rendirse. "Siguiente canción" arreglaba esto a mano
-        // justamente porque disparaba una resolución nueva.
-        _urls.remove(t.videoId);
-        _enVuelo.remove(t.videoId);
-        final urlFresca = await _resolverUrl(t.videoId);
-        await mpv.open(Media(urlFresca));
-      }
+      await mpv.open(Media(url));
       _adelantarSiguiente();
+      _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
+        if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
+      });
     } catch (e) {
+      _pistaAbriendo = null;
       error = '$e';
       rethrow;
     } finally {
       resolviendo = null;
       _cambiando = false;
       notifyListeners();
+    }
+  }
+
+  /// Reintenta abrir la pista con una URL fresca cuando el stream asíncrono
+  /// de libmpv falla al abrir el medio inicial.
+  Future<void> _reintentarConUrlFresca(YtTrack t) async {
+    _urls.remove(t.videoId);
+    _enVuelo.remove(t.videoId);
+    try {
+      final urlFresca = await _resolverUrl(t.videoId);
+      // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
+      // no abrimos ni modificamos el estado de la pista nueva.
+      if (actual?.videoId != t.videoId) return;
+      await _mpv?.open(Media(urlFresca));
+      _temporizadorAbriendo?.cancel();
+      _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
+        if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
+      });
+    } catch (e) {
+      if (actual?.videoId == t.videoId) {
+        _pistaAbriendo = null;
+        error = 'Error de reproducción: $e';
+        notifyListeners();
+      }
     }
   }
 
@@ -531,6 +564,9 @@ class YtPlayer extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    _temporizadorAbriendo?.cancel();
+    _pistaAbriendo = null;
+    _reintentoUsado = false;
     await _mpv?.stop();
     cola = const [];
     indice = -1;
@@ -541,6 +577,7 @@ class YtPlayer extends ChangeNotifier {
 
   @override
   void dispose() {
+    _temporizadorAbriendo?.cancel();
     unawaited(_subCompletado?.cancel());
     unawaited(_subError?.cancel());
     unawaited(_mpv?.dispose());
