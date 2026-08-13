@@ -43,7 +43,7 @@ class YtPlayerException implements Exception {
 /// tenga fecha de caducidad propia y conservadora.
 class YtPlayer extends ChangeNotifier {
   YtPlayer({int volumenInicial = 60})
-      : volumen = volumenInicial.clamp(0, 100),
+      : _volumen = ValueNotifier<int>(volumenInicial.clamp(0, 100)),
         _mpv = libmpvDisponible ? Player() : null {
     final mpv = _mpv;
     if (mpv == null) {
@@ -56,7 +56,7 @@ class YtPlayer extends ChangeNotifier {
     // El volumen guardado se aplica ya, antes de que suene nada: aplicarlo al
     // abrir la primera pista se oiría como un salto de volumen a mitad de la
     // primera nota.
-    unawaited(mpv.setVolume(volumen.toDouble()));
+    unawaited(mpv.setVolume(_volumen.value.toDouble()));
     // Cuando una pista termina sola, sigue la cola. `completed` también se
     // emite al abrir un medio nuevo en algunas versiones, de ahí el control
     // de que haya sonado algo de verdad y no estemos ya cambiando de pista.
@@ -95,7 +95,7 @@ class YtPlayer extends ChangeNotifier {
   static String motivoSinLibmpv =
       'No se encuentra libmpv, la librería que reproduce el audio de NeoTube. '
       'Instala el paquete de tu distribución (Arch: mpv · Debian/Ubuntu: '
-      'libmpv2 · Fedora: mpv-libs) y vuelve a abrir NeoFy.';
+      'libmpv2 · Fedora: mpv-libs) y vuelve a abrir NeoTube.';
 
   /// El reproductor de verdad, o `null` si falta libmpv. Privado a propósito:
   /// fuera se usan [sonando], [posicion] y compañía, que ya contemplan que no
@@ -150,8 +150,9 @@ class YtPlayer extends ChangeNotifier {
   bool _cambiando = false;
 
   /// URLs ya resueltas, con su caducidad. Se limita a un puñado: no es una
-  /// caché de verdad, es el adelanto de la siguiente pista.
+  /// caché de verdad, es el adelanto de las siguientes pistas.
   final Map<String, ({String url, DateTime hasta})> _urls = {};
+  final Map<String, Future<String>> _enVuelo = {};
   static const _vidaDeUrl = Duration(minutes: 45);
 
   // ------------------------------------------------------------------ yt-dlp
@@ -165,16 +166,51 @@ class YtPlayer extends ChangeNotifier {
   /// cada pocas semanas. Si el usuario tiene uno instalado y más reciente que
   /// el que vino en el paquete, es mejor que el nuestro; y si el suyo es lo
   /// único que hay, NeoTube funciona igual en vez de no reproducir nada.
-  static File? findYtDlpBinary() {
+  static File? _bin;
+  static bool _buscado = false;
+
+  static File? findYtDlpBinary({bool refrescar = false}) {
+    if (refrescar) {
+      _bin = null;
+      _buscado = false;
+    }
+    if (_buscado) return _bin;
+    _buscado = true;
     final nombre = 'yt-dlp$sufijoEjecutable';
     for (final c in [
       p.join(p.dirname(Platform.resolvedExecutable), nombre),
       p.join(Directory.current.path, 'tool', 'ytdlp-build', 'bin', nombre),
     ]) {
       final f = File(c);
-      if (f.existsSync()) return f;
+      if (f.existsSync()) return _bin = f;
     }
-    return _enElPath(nombre);
+    return _bin = _enElPath(nombre);
+  }
+
+  static File? _denoBin;
+  static bool _denoBuscado = false;
+
+  /// Busca el runtime de JavaScript (Deno) para yt-dlp.
+  ///
+  /// Si está presente (junto al ejecutable, en tool/ytdlp-build/bin/ o en el
+  /// PATH), se le pasa a yt-dlp con `--js-runtimes deno:<ruta>` para resolver
+  /// el desafío de JavaScript sin advertencias de deprecación ni throttling.
+  static File? findDenoBinary({bool refrescar = false}) {
+    if (refrescar) {
+      _denoBin = null;
+      _denoBuscado = false;
+    }
+    if (_denoBuscado) return _denoBin;
+    _denoBuscado = true;
+    final nombre = 'deno$sufijoEjecutable';
+    for (final c in [
+      p.join(p.dirname(Platform.resolvedExecutable), nombre),
+      p.join(Directory.current.path, 'tool', 'ytdlp-build', 'bin', nombre),
+    ]) {
+      final f = File(c);
+      if (f.existsSync()) return _denoBin = f;
+    }
+    return _denoBin = _enElPath(nombre);
   }
 
   /// Recorre el PATH a mano en vez de dejar que lo resuelva el sistema al
@@ -196,47 +232,28 @@ class YtPlayer extends ChangeNotifier {
     return null;
   }
 
-  /// PATH mínimo para volver a intentar una invocación que murió recorriendo
-  /// el PATH del usuario. Ver [_ejecutar].
-  static String get _pathMinimo => Platform.isWindows
-      ? [
-          '${Platform.environment['SystemRoot'] ?? r'C:\Windows'}\\system32',
-          Platform.environment['SystemRoot'] ?? r'C:\Windows',
-        ].join(';')
-      : '/usr/bin:/bin';
+  /// Una ruta limpia para los subprocesos. Sin esto, `Process.run` hereda el
+  /// PATH entero del sistema, que en la máquina de un desarrollador puede
+  /// tener Python 3.13, msys64 o binarios incompatibles por delante de lo
+  /// nuestro.
+  static final String _pathMinimo = () {
+    final dirs = <String>[];
+    if (Platform.isWindows) {
+      final sys = Platform.environment['SystemRoot'] ?? r'C:\Windows';
+      dirs.addAll([
+        p.join(sys, 'System32'),
+        sys,
+        p.join(sys, 'System32', 'Wbem'),
+      ]);
+    } else {
+      dirs.addAll(['/usr/bin', '/bin', '/usr/local/bin']);
+    }
+    return dirs.join(Platform.isWindows ? ';' : ':');
+  }();
 
-  /// Lanza yt-dlp y, si se cae **recorriendo el PATH**, lo reintenta con uno
-  /// mínimo.
-  ///
-  /// El fallo real que arregla, en Windows 11:
-  ///
-  ///     ERROR: [WinError 448] The path cannot be traversed because it
-  ///     contains an untrusted mount point: 'C:\Users\...\.mavis\bin'
-  ///
-  /// Ese error es de *Redirection Guard*, la mitigación que impide seguir
-  /// junctions que podrían ser un ataque de enlaces. yt-dlp recorre el PATH
-  /// buscando ffmpeg y un runtime de JavaScript, y si alguna entrada es un
-  /// junction, revienta entero: ni resuelve la URL ni reproduce nada.
-  ///
-  /// Y lo que lo hace difícil de ver: **la mitigación se hereda del proceso
-  /// padre**. Lanzada desde el menú de inicio la app no la tiene, pero recién
-  /// actualizada la arranca el instalador, que sí — así que el sintoma aparece
-  /// justo despues de actualizar y desaparece al reabrir la app a mano, que es
-  /// lo que despista.
-  ///
-  /// No se le recorta el PATH de entrada a todo el mundo: yt-dlp lo usa para
-  /// encontrar ffmpeg y el runtime de JS, y quien los tenga instalados sale
-  /// perdiendo formatos. Se reintenta solo cuando se ha visto fallar.
-  static Future<ProcessResult> _ejecutar(String ruta, List<String> args) async {
-    final res = await Process.run(ruta, args).timeout(const Duration(seconds: 25));
-    if (res.exitCode == 0) return res;
-    final salida = '${res.stderr}';
-    final esDelPath = salida.contains('untrusted mount point') ||
-        salida.contains('WinError 448');
-    if (!esDelPath) return res;
-    debugPrint('[NeoTube] yt-dlp no pudo recorrer el PATH; reintento con uno mínimo');
+  static Future<ProcessResult> _ejecutar(String exe, List<String> args) {
     return Process.run(
-      ruta,
+      exe,
       args,
       // Solo se pisa PATH: el resto del entorno (SystemRoot, TEMP…) sigue
       // haciendo falta, y sin él ni siquiera arranca el intérprete embebido.
@@ -270,44 +287,66 @@ class YtPlayer extends ChangeNotifier {
   /// `runInShell`, que es el que de verdad abriría una shell) no pasa por
   /// ninguna shell del sistema.
   ///
-  /// Sin `matarHuerfano` a propósito: eso es para procesos vigilados que se
-  /// quedan vivos entre arranques (librespot, metadata-sidecar); aquí cada
-  /// pista lanza el suyo y `Process.run` ya espera a que termine solo. Matar
-  /// por nombre de imagen antes de cada invocación llegó a cargarse una
-  /// resolución en marcha si se pulsaba una segunda canción demasiado rápido.
+  /// Deduplica resoluciones concurrentes mediante [_enVuelo] para no lanzar
+  /// múltiples procesos de yt-dlp para la misma pista.
   Future<String> _resolverUrl(String videoId) async {
     final guardada = _urls[videoId];
     if (guardada != null && guardada.hasta.isAfter(DateTime.now())) return guardada.url;
 
+    final enMarcha = _enVuelo[videoId];
+    if (enMarcha != null) return enMarcha;
+
+    final future = _resolverUrlDirecto(videoId);
+    _enVuelo[videoId] = future;
+    try {
+      final url = await future;
+      if (_urls.length > 24) _urls.remove(_urls.keys.first);
+      _urls[videoId] = (url: url, hasta: DateTime.now().add(_vidaDeUrl));
+      return url;
+    } finally {
+      _enVuelo.remove(videoId);
+    }
+  }
+
+  Future<String> _resolverUrlDirecto(String videoId) async {
     final bin = findYtDlpBinary();
     if (bin == null) {
       throw YtPlayerException(
           'No se encuentra yt-dlp. Ejecuta tool/fetch_ytdlp.ps1 (o .sh en Linux).');
     }
-    final res = await _ejecutar(
-      bin.path,
-      ['-f', 'bestaudio', '-g', 'https://www.youtube.com/watch?v=$videoId'],
-    );
+    final deno = findDenoBinary();
+    final args = <String>[
+      if (deno != null) ...['--js-runtimes', 'deno:${deno.path}'],
+      '-f',
+      'bestaudio',
+      '-g',
+      'https://www.youtube.com/watch?v=$videoId',
+    ];
+    final res = await _ejecutar(bin.path, args);
     if (res.exitCode != 0) {
       throw YtPlayerException('yt-dlp no pudo resolver el vídeo: ${res.stderr}');
     }
     final url = (res.stdout as String).trim().split('\n').first.trim();
     if (url.isEmpty) throw YtPlayerException('yt-dlp no devolvió ninguna URL.');
-
-    if (_urls.length > 12) _urls.clear();
-    _urls[videoId] = (url: url, hasta: DateTime.now().add(_vidaDeUrl));
     return url;
   }
 
-  /// Adelanta la resolución de la siguiente pista mientras suena la actual.
+  /// Adelanta la resolución de las siguientes dos pistas mientras suena la actual.
   /// Falla en silencio a propósito: es un adelanto, y si no llega a tiempo se
   /// resolverá cuando toque como se hacía antes.
+  /// Limita a un máximo de 2 resoluciones concurrentes para no saturar procesos ni red.
   void _adelantarSiguiente() {
-    final proxima = indice + 1 < cola.length ? cola[indice + 1] : null;
-    if (proxima == null) return;
-    final guardada = _urls[proxima.videoId];
-    if (guardada != null && guardada.hasta.isAfter(DateTime.now())) return;
-    unawaited(_resolverUrl(proxima.videoId).catchError((_) => ''));
+    if (indice < 0) return;
+    for (var offset = 1; offset <= 2; offset++) {
+      final pos = indice + offset;
+      if (pos >= cola.length) break;
+      final proxima = cola[pos];
+      final guardada = _urls[proxima.videoId];
+      if (guardada != null && guardada.hasta.isAfter(DateTime.now())) continue;
+      if (_enVuelo.containsKey(proxima.videoId)) continue;
+      if (_enVuelo.length >= 2) break;
+      unawaited(_resolverUrl(proxima.videoId).catchError((_) => ''));
+    }
   }
 
   // ------------------------------------------------------------- reproducción
@@ -319,9 +358,15 @@ class YtPlayer extends ChangeNotifier {
     String? contexto,
   }) async {
     if (pistas.isEmpty || !disponible) return;
+    final indiceDeseado = desde.clamp(0, pistas.length - 1);
+    final pistaDeseada = pistas[indiceDeseado];
+    // Evita doble clic impaciente sobre la misma pista que ya se está abriendo
+    if (_cambiando && resolviendo == pistaDeseada.videoId && actual?.videoId == pistaDeseada.videoId) {
+      return;
+    }
     cola = List.unmodifiable(pistas);
     this.contexto = contexto;
-    indice = desde.clamp(0, pistas.length - 1);
+    indice = indiceDeseado;
     await _abrirActual();
   }
 
@@ -444,7 +489,9 @@ class YtPlayer extends ChangeNotifier {
   /// Volumen actual, 0..100. Se guarda aquí y no se lee de
   /// `player.state.volume` porque la barra tiene que poder pintarlo antes de
   /// que haya sonado nada.
-  int volumen;
+  final ValueNotifier<int> _volumen;
+  int get volumen => _volumen.value;
+  ValueListenable<int> get cambiosDeVolumen => _volumen;
 
   /// Se llama al soltar el mando del volumen, para persistirlo. No en cada
   /// paso del arrastre: eso serían decenas de escrituras del config por cada
@@ -457,9 +504,8 @@ class YtPlayer extends ChangeNotifier {
   /// acababa devolviendo 429.
   Future<void> setVolumen(int v) async {
     final nuevo = v.clamp(0, 100);
-    if (nuevo == volumen) return;
-    volumen = nuevo;
-    notifyListeners();
+    if (nuevo == _volumen.value) return;
+    _volumen.value = nuevo;
     await _mpv?.setVolume(nuevo.toDouble());
   }
 
@@ -486,6 +532,7 @@ class YtPlayer extends ChangeNotifier {
     unawaited(_subCompletado?.cancel());
     unawaited(_subError?.cancel());
     unawaited(_mpv?.dispose());
+    _volumen.dispose();
     super.dispose();
   }
 }

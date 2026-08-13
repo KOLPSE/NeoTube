@@ -454,4 +454,140 @@ void main() {
           'Desde dos columnas');
     });
   });
+
+  group('continuación de portada', () {
+    Map<String, dynamic> portadaConContinuacion(
+      List<dynamic> bloques, {
+      String? continuationToken,
+    }) =>
+        {
+          'contents': {
+            'singleColumnBrowseResultsRenderer': {
+              'tabs': [
+                {
+                  'tabRenderer': {
+                    'content': {
+                      'sectionListRenderer': {
+                        'contents': bloques,
+                        if (continuationToken != null)
+                          'continuations': [
+                            {
+                              'nextContinuationData': {
+                                'continuation': continuationToken,
+                              },
+                            },
+                          ],
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        };
+
+    Map<String, dynamic> respuestaContinuacion(
+      List<dynamic> bloques, {
+      String? nuevoToken,
+    }) =>
+        {
+          'continuationContents': {
+            'sectionListContinuation': {
+              'contents': bloques,
+              if (nuevoToken != null)
+                'continuations': [
+                  {
+                    'nextContinuationData': {
+                      'continuation': nuevoToken,
+                    },
+                  },
+                ],
+            },
+          },
+        };
+
+    Map<String, dynamic> carrusel(String titulo, List<dynamic> items) => {
+          'musicCarouselShelfRenderer': {
+            'header': {
+              'musicCarouselShelfBasicHeaderRenderer': {
+                'title': {
+                  'runs': [
+                    {'text': titulo},
+                  ],
+                },
+              },
+            },
+            'contents': items,
+          },
+        };
+
+    test('la portada con continuations devuelve su token para la siguiente tanda', () {
+      final j = portadaConContinuacion(
+        [
+          carrusel('Primer bloque', [tarjeta(titulo: 'Canción 1', videoId: 'v1')]),
+        ],
+        continuationToken: 'token-tanda-2',
+      );
+
+      final secciones = api.seccionesDeRespuesta(j);
+      final token = YtMusicApi.extraerTokenContinuacionDeBrowse(j);
+
+      expect(secciones, hasLength(1));
+      expect(secciones.first.titulo, 'Primer bloque');
+      expect(token, 'token-tanda-2');
+    });
+
+    test('la segunda tanda de portada parsea sus secciones y detecta fin de lista', () {
+      final jCont = respuestaContinuacion(
+        [
+          carrusel('Selecciones rápidas', [tarjeta(titulo: 'Canción 2', videoId: 'v2')]),
+        ],
+        nuevoToken: null,
+      );
+
+      final (seccionesCont, siguienteToken) =
+          YtMusicApi.seccionesContinuationDeRespuesta(jCont);
+
+      expect(seccionesCont, hasLength(1));
+      expect(seccionesCont.first.titulo, 'Selecciones rápidas');
+      expect(seccionesCont.first.items.single.titulo, 'Canción 2');
+      expect(siguienteToken, isNull);
+    });
+
+    test('las secciones de ambas tandas se juntan y conservan todos los elementos', () {
+      final tanda1 = portadaConContinuacion(
+        [
+          carrusel('Populares', [tarjeta(titulo: 'Hit 1', videoId: 'h1')]),
+          carrusel('Novedades', [tarjeta(titulo: 'Nuevo 1', videoId: 'n1')]),
+        ],
+        continuationToken: 'token-siguiente',
+      );
+
+      final tanda2 = respuestaContinuacion(
+        [
+          carrusel('Selecciones rápidas', [tarjeta(titulo: 'Mix 1', videoId: 'm1')]),
+        ],
+      );
+
+      final sec1 = api.seccionesDeRespuesta(tanda1);
+      final token1 = YtMusicApi.extraerTokenContinuacionDeBrowse(tanda1);
+      expect(token1, 'token-siguiente');
+
+      final (sec2, token2) = YtMusicApi.seccionesContinuationDeRespuesta(tanda2);
+      expect(token2, isNull);
+
+      final totalSecciones = [...sec1, ...sec2];
+      expect(totalSecciones, hasLength(3));
+      expect(totalSecciones.map((s) => s.titulo),
+          ['Populares', 'Novedades', 'Selecciones rápidas']);
+    });
+
+    test('una portada sin continuations devuelve token nulo', () {
+      final j = portadaConContinuacion([
+        carrusel('Solo una', [tarjeta(titulo: 'Única', videoId: 'u1')]),
+      ]);
+
+      expect(YtMusicApi.extraerTokenContinuacionDeBrowse(j), isNull);
+    });
+  });
 }

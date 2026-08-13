@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../core/app_mode.dart';
 import '../core/resource_monitor.dart';
 import '../core/settings.dart';
 import '../core/updater.dart';
@@ -12,7 +11,6 @@ import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
 import '../core/yt_player.dart';
 import 'art_image.dart';
-import 'mode_toggle_text.dart';
 import 'settings_dialog.dart';
 import 'yt_acciones.dart';
 import 'yt_ajustes.dart';
@@ -28,7 +26,6 @@ enum _NeoTubeView { inicio, explorar, biblioteca, buscar, cola }
 class NeoTubeShell extends StatefulWidget {
   const NeoTubeShell({
     super.key,
-    required this.onToggleMode,
     required this.auth,
     required this.api,
     required this.player,
@@ -36,11 +33,9 @@ class NeoTubeShell extends StatefulWidget {
     required this.settings,
     required this.updater,
     required this.onSalirParaActualizar,
-    this.onLiberarRam,
     this.onLogout,
   });
 
-  final VoidCallback onToggleMode;
   final YtAuth auth;
   final YtMusicApi api;
   final YtPlayer player;
@@ -52,10 +47,6 @@ class NeoTubeShell extends StatefulWidget {
   final Settings settings;
   final Updater updater;
   final Future<void> Function() onSalirParaActualizar;
-
-  /// Se llama a mitad de la animación del botón, con NeoTube todavía en
-  /// pantalla: hueco para soltar RAM antes de volver a NeoFy.
-  final VoidCallback? onLiberarRam;
 
   final Future<void> Function()? onLogout;
 
@@ -73,10 +64,10 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
 
   // Un store por pestaña, creado una vez y no en cada `_content()`: así no se
   // repite la carga cada vez que se cambia de pestaña y se vuelve.
-  late final YtHomeStore _inicio =
-      YtHomeStore(() => widget.api.browseSections(YtMusicApi.browseIdInicio));
-  late final YtHomeStore _explorar =
-      YtHomeStore(() => widget.api.browseSections(YtMusicApi.browseIdExplorar));
+  late final YtHomeStore _inicio = YtHomeStore(
+      ({bool forzar = false}) => widget.api.browseSections(YtMusicApi.browseIdInicio, forzar: forzar));
+  late final YtHomeStore _explorar = YtHomeStore(
+      ({bool forzar = false}) => widget.api.browseSections(YtMusicApi.browseIdExplorar, forzar: forzar));
   // La biblioteca no es un `browseId`, son cuatro: playlists, álbumes,
   // canciones y artistas viven en endpoints distintos.
   late final YtHomeStore _biblioteca = YtHomeStore(widget.api.biblioteca);
@@ -87,12 +78,53 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     abrir: (item) => setState(() => _abierto = item),
   );
 
+  String? _ultimoError;
+
+  @override
+  void initState() {
+    super.initState();
+    _ultimoError = widget.player.error;
+    widget.player.addListener(_onPlayerCambio);
+  }
+
+  @override
+  void didUpdateWidget(NeoTubeShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.player != widget.player) {
+      oldWidget.player.removeListener(_onPlayerCambio);
+      widget.player.addListener(_onPlayerCambio);
+      _ultimoError = widget.player.error;
+    }
+  }
+
   @override
   void dispose() {
+    widget.player.removeListener(_onPlayerCambio);
     _inicio.dispose();
     _explorar.dispose();
     _biblioteca.dispose();
     super.dispose();
+  }
+
+  void _onPlayerCambio() {
+    final err = widget.player.error;
+    if (err != null && err != _ultimoError) {
+      _ultimoError = err;
+      if (mounted) {
+        final mensaje = err.startsWith('YtPlayerException: ')
+            ? err.substring('YtPlayerException: '.length)
+            : err;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('No se pudo reproducir: $mensaje'),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } else if (err == null) {
+      _ultimoError = null;
+    }
   }
 
   void _irA(_NeoTubeView v) => setState(() {
@@ -103,37 +135,28 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Column(
+      body: Row(
         children: [
-          Expanded(
-            child: Row(
-              children: [
-                // Escucha al reproductor: "En cola" aparece en cuanto hay algo
-                // que enseñar, sin esperar a que algo más redibuje el shell.
-                AnimatedBuilder(
-                  animation: widget.player,
-                  builder: (context, _) => _Sidebar(
-                    view: _view,
-                    hayCola: widget.player.cola.isNotEmpty,
-                    onSelectView: _irA,
-                    onToggleMode: widget.onToggleMode,
-                    onLiberarRam: widget.onLiberarRam,
-                    onLogout: widget.auth.isLoggedIn ? widget.onLogout : null,
-                    ram: widget.ram,
-                    settings: widget.settings,
-                    updater: widget.updater,
-                    onSalirParaActualizar: widget.onSalirParaActualizar,
-                  ),
-                ),
-                const VerticalDivider(width: 1),
-                Expanded(child: _content()),
-              ],
+          // Escucha al reproductor: "En cola" aparece en cuanto hay algo
+          // que enseñar, sin esperar a que algo más redibuje el shell.
+          AnimatedBuilder(
+            animation: widget.player,
+            builder: (context, _) => _Sidebar(
+              view: _view,
+              hayCola: widget.player.cola.isNotEmpty,
+              onSelectView: _irA,
+              onLogout: widget.auth.isLoggedIn ? widget.onLogout : null,
+              ram: widget.ram,
+              settings: widget.settings,
+              updater: widget.updater,
+              onSalirParaActualizar: widget.onSalirParaActualizar,
             ),
           ),
-          const Divider(height: 1),
-          _BarraInferior(player: widget.player),
+          const VerticalDivider(width: 1),
+          Expanded(child: _content()),
         ],
       ),
+      bottomNavigationBar: _BarraInferior(player: widget.player),
     );
   }
 
@@ -161,18 +184,21 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     }
     return switch (_view) {
       _NeoTubeView.inicio => YtBrowseScreen(
+          key: const PageStorageKey('inicio'),
           store: _inicio,
           player: widget.player,
           acciones: _acciones,
           tituloVacio: 'No se ha podido traer la portada todavía.',
         ),
       _NeoTubeView.explorar => YtBrowseScreen(
+          key: const PageStorageKey('explorar'),
           store: _explorar,
           player: widget.player,
           acciones: _acciones,
           tituloVacio: 'No se ha podido traer nada para explorar todavía.',
         ),
       _NeoTubeView.biblioteca => YtBrowseScreen(
+          key: const PageStorageKey('biblioteca'),
           store: _biblioteca,
           player: widget.player,
           acciones: _acciones,
@@ -217,11 +243,8 @@ class _SinLibmpv extends StatelessWidget {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
-              // NeoFy sí funciona: su audio lo pone librespot, que es un
-              // proceso aparte y no depende de libmpv para nada.
               Text(
-                'El modo NeoFy (Spotify) no está afectado: su audio va por otro '
-                'camino y sigue funcionando.',
+                'Sin libmpv NeoTube no puede emitir ningún sonido.',
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 textAlign: TextAlign.center,
@@ -239,20 +262,16 @@ class _Sidebar extends StatelessWidget {
     required this.view,
     required this.hayCola,
     required this.onSelectView,
-    required this.onToggleMode,
     required this.ram,
     required this.settings,
     required this.updater,
     required this.onSalirParaActualizar,
-    this.onLiberarRam,
     this.onLogout,
   });
 
   final _NeoTubeView view;
   final bool hayCola;
   final void Function(_NeoTubeView) onSelectView;
-  final VoidCallback onToggleMode;
-  final VoidCallback? onLiberarRam;
   final Future<void> Function()? onLogout;
   final ResourceMonitor ram;
   final Settings settings;
@@ -268,11 +287,7 @@ class _Sidebar extends StatelessWidget {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 16, 16, 8),
-            child: ModeToggleText(
-              modo: AppMode.neotube,
-              onTap: onToggleMode,
-              onSufijoBorrado: onLiberarRam,
-            ),
+            child: Text('NeoTube', style: Theme.of(context).textTheme.titleLarge),
           ),
           _NavTile(
             icon: Icons.home,
@@ -438,31 +453,66 @@ class _BarraInferior extends StatelessWidget {
         if (t == null) {
           return Material(
             color: theme.colorScheme.surfaceContainer,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              child: Row(
-                children: [
-                  Icon(Icons.music_off,
-                      size: 20, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Text('Nada sonando en NeoTube',
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                ],
-              ),
-            ),
-          );
-        }
-        return Material(
-          color: theme.colorScheme.surfaceContainer,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                  child: Row(
+                    children: [
+                      Icon(Icons.music_off,
+                          size: 20, color: theme.colorScheme.onSurfaceVariant),
+                      const SizedBox(width: 8),
+                      Text('Nada sonando en NeoTube',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        final resolviendo = player.resolviendo != null;
+        return Material(
+          elevation: 8,
+          color: theme.colorScheme.surfaceContainerHigh,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                 Row(
                   children: [
-                    ArtImage(url: t.miniatura, size: 48),
+                    Stack(
+                      children: [
+                        ArtImage(url: t.miniatura, size: 48, radius: 6),
+                        if (resolviendo)
+                          Positioned.fill(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.black45,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Center(
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
@@ -471,11 +521,14 @@ class _BarraInferior extends StatelessWidget {
                         children: [
                           Text(t.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
                           Text(
-                            t.artista,
+                            resolviendo ? '${t.artista} • Cargando audio...' : t.artista,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: resolviendo
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
                           ),
                         ],
                       ),
@@ -487,7 +540,7 @@ class _BarraInferior extends StatelessWidget {
                       onPressed:
                           player.puedeVolver ? () => unawaited(player.anterior()) : null,
                     ),
-                    if (player.resolviendo != null)
+                    if (resolviendo)
                       const Padding(
                         padding: EdgeInsets.all(12),
                         child: SizedBox(
@@ -522,9 +575,11 @@ class _BarraInferior extends StatelessWidget {
               ],
             ),
           ),
-        );
-      },
+        ],
+      ),
     );
+  },
+);
   }
 }
 
@@ -549,32 +604,37 @@ class _Volumen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return SizedBox(
-      width: 150,
-      child: Row(
-        children: [
-          Icon(_icono(player.volumen), size: 18),
-          Expanded(
-            child: SliderTheme(
-              data: SliderTheme.of(context).copyWith(
-                trackHeight: 3,
-                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+    return ValueListenableBuilder<int>(
+      valueListenable: player.cambiosDeVolumen,
+      builder: (context, vol, _) {
+        return SizedBox(
+          width: 150,
+          child: Row(
+            children: [
+              Icon(_icono(vol), size: 18),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 3,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                  ),
+                  child: Slider(
+                    value: vol.toDouble(),
+                    max: 100,
+                    onChanged: (v) => unawaited(player.setVolumen(v.round())),
+                    onChangeEnd: (v) => player.onVolumenFijado?.call(v.round()),
+                  ),
+                ),
               ),
-              child: Slider(
-                value: player.volumen.toDouble(),
-                max: 100,
-                onChanged: (v) => unawaited(player.setVolumen(v.round())),
-                onChangeEnd: (v) => player.onVolumenFijado?.call(v.round()),
+              SizedBox(
+                width: 26,
+                child: Text('$vol', style: theme.textTheme.bodySmall),
               ),
-            ),
+            ],
           ),
-          SizedBox(
-            width: 26,
-            child: Text('${player.volumen}', style: theme.textTheme.bodySmall),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -603,7 +663,20 @@ class _ProgresoState extends State<_Progreso> {
       builder: (context, snapPos) {
         final total = widget.player.duracion.inMilliseconds.toDouble();
         final pos = (snapPos.data ?? Duration.zero).inMilliseconds.toDouble();
-        if (total <= 0) return const SizedBox(height: 24);
+        if (total <= 0) {
+          if (widget.player.resolviendo != null) {
+            return const SizedBox(
+              height: 24,
+              child: Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: LinearProgressIndicator(minHeight: 2),
+                ),
+              ),
+            );
+          }
+          return const SizedBox(height: 24);
+        }
         final valor = (_arrastrando ?? pos).clamp(0, total).toDouble();
         return Row(
           children: [

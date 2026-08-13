@@ -133,69 +133,6 @@ class _DialogoAjustes extends StatelessWidget {
   }
 }
 
-/// Salida de emergencia para cuando la música se queda muda. **Solo NeoFy**:
-/// es librespot lo que se reinicia, y NeoTube no lo usa (reproduce en este
-/// mismo proceso). Se pasa por `mostrarAjustes(propiosDelModo:)`.
-///
-/// La app ya reinicia el audio sola al cambiar la salida del sistema o al ver
-/// un error del backend en el log, pero no todo se detecta: un driver que se
-/// atasca o una aplicación que se queda el dispositivo en modo exclusivo no
-/// avisan a nadie. Esto es lo mismo que hacía el usuario cerrando y abriendo la
-/// app, pero sin perder la sesión ni la canción.
-class ReiniciarAudioDeNeoFy extends StatefulWidget {
-  const ReiniciarAudioDeNeoFy({super.key, required this.onReiniciar});
-
-  final Future<void> Function() onReiniciar;
-
-  @override
-  State<ReiniciarAudioDeNeoFy> createState() => _ReiniciarAudioState();
-}
-
-class _ReiniciarAudioState extends State<ReiniciarAudioDeNeoFy> {
-  bool _enMarcha = false;
-
-  Future<void> _reiniciar() async {
-    setState(() => _enMarcha = true);
-    try {
-      await widget.onReiniciar();
-    } finally {
-      if (mounted) setState(() => _enMarcha = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Audio', style: theme.textTheme.bodyMedium),
-              const SizedBox(height: 2),
-              Text(
-                _enMarcha
-                    ? 'Reabriendo la salida…'
-                    : 'Si deja de oírse, vuelve a abrir la salida sin cerrar '
-                        'NeoFy. Sigue por donde iba.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        OutlinedButton(
-          onPressed: _enMarcha ? null : () => unawaited(_reiniciar()),
-          child: const Text('Reiniciar'),
-        ),
-      ],
-    );
-  }
-}
-
 /// Versión instalada y actualización en un clic.
 class _Actualizaciones extends StatelessWidget {
   const _Actualizaciones({
@@ -234,8 +171,7 @@ class _Actualizaciones extends StatelessWidget {
                   // presenta con la identidad del modo en el que estás (es lo
                   // que hace también el título de la barra lateral).
                   Text(
-                    '${modoApp.value.esNeoTube ? 'NeoTube' : 'NeoFy'} '
-                    '${updater.versionActual}',
+                    'NeoTube ${updater.versionActual}',
                     style: theme.textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 2),
@@ -253,7 +189,7 @@ class _Actualizaciones extends StatelessWidget {
                       EstadoActualizacion.descargando =>
                         'Descargando… ${(updater.progreso * 100).round()} %',
                       EstadoActualizacion.listaParaInstalar =>
-                        'Instalando; NeoFy se reiniciará',
+                        'Instalando; NeoTube se reiniciará',
                       EstadoActualizacion.fallo =>
                         updater.error ?? 'No se pudo comprobar',
                       EstadoActualizacion.reposo => 'Comprobar si hay novedades',

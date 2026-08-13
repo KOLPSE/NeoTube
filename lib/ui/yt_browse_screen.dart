@@ -59,17 +59,31 @@ double _altoDeTira(BuildContext context, TextStyle estilo, int lineas) {
 }
 
 class _YtBrowseScreenState extends State<YtBrowseScreen> {
+  late Listenable _escuchable;
+
   @override
   void initState() {
     super.initState();
+    _escuchable = Listenable.merge([widget.store, widget.player]);
     unawaited(widget.store.cargarSiHaceFalta());
+  }
+
+  @override
+  void didUpdateWidget(YtBrowseScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.store != oldWidget.store || widget.player != oldWidget.player) {
+      _escuchable = Listenable.merge([widget.store, widget.player]);
+    }
+    if (widget.store != oldWidget.store) {
+      unawaited(widget.store.cargarSiHaceFalta());
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AnimatedBuilder(
-      animation: Listenable.merge([widget.store, widget.player]),
+      animation: _escuchable,
       builder: (context, _) {
         final store = widget.store;
         if (store.cargando && store.vacio) {
@@ -94,14 +108,16 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
         // canciones" se parte con frecuencia).
         final estilo = theme.textTheme.bodySmall ?? const TextStyle(fontSize: 12);
         final alto = _altoDeTira(context, estilo, 3);
-        return RefreshIndicator(
-          onRefresh: store.cargar,
-          child: ListView(
-            // Sin margen lateral: lo pone la propia tira, para que las flechas
-            // queden sobre el borde y no flotando dentro del contenido.
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            children: [
-              for (final seccion in store.secciones) ...[
+        return ListView.builder(
+          key: PageStorageKey(widget.store),
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          itemCount: store.secciones.length,
+          itemBuilder: (context, index) {
+            final seccion = store.secciones[index];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
                 if (seccion.titulo.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -131,8 +147,8 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                 ),
                 const SizedBox(height: 28),
               ],
-            ],
-          ),
+            );
+          },
         );
       },
     );

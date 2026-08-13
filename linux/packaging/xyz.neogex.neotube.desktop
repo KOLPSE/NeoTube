@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=NeoTube
+GenericName=Reproductor de musica
+Comment=Cliente nativo de YouTube Music
+Exec=/usr/bin/neotube
+Icon=neotube
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=youtube;youtube-music;music;musica;player;reproductor;audio;
+StartupNotify=true
+
+# Debe ser igual al APPLICATION_ID de linux/CMakeLists.txt y al nombre de este
+# fichero para que el escritorio asocie la ventana con su lanzador.
+StartupWMClass=xyz.neogex.neotube

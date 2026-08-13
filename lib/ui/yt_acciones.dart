@@ -49,8 +49,9 @@ class YtAcciones {
   Future<void> reproducirCancion(BuildContext context, YtTrack t) async {
     try {
       await player.reproducirPista(t);
-    } catch (e) {
-      if (context.mounted) _avisar(context, 'No se pudo reproducir: $e');
+    } catch (_) {
+      // El error queda en player.error y el ScaffoldMessenger del shell raíz
+      // se encarga de mostrarlo siempre, aunque este widget se haya desmontado.
       return;
     }
     unawaited(api.radioDe(t.videoId).then((radio) {
@@ -70,7 +71,11 @@ class YtAcciones {
       }
       await player.reproducirLista(c.pistas, contexto: item.playlistId ?? item.browseId);
     } catch (e) {
-      if (context.mounted) _avisar(context, 'No se pudo reproducir la lista: $e');
+      // Si el error fue al reproducir la pista dentro de la lista, ya lo
+      // gestiona player.error y el shell. Si fue al traer la lista de la API:
+      if (player.error == null && context.mounted) {
+        _avisar(context, 'No se pudo reproducir la lista: $e');
+      }
     }
   }
 

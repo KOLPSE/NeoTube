@@ -41,3 +41,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/tray.ico
+    - assets/tray.png

@@ -12,7 +12,7 @@ import 'yt_models.dart';
 class YtHomeStore extends ChangeNotifier {
   YtHomeStore(this.cargarSecciones);
 
-  final Future<List<YtSection>> Function() cargarSecciones;
+  final Function cargarSecciones;
 
   List<YtSection> secciones = const [];
   bool cargando = false;
@@ -20,12 +20,21 @@ class YtHomeStore extends ChangeNotifier {
 
   bool get vacio => secciones.isEmpty;
 
-  Future<void> cargar() async {
+  Future<void> cargar({bool forzar = true}) async {
     cargando = true;
     error = null;
     notifyListeners();
     try {
-      secciones = await cargarSecciones();
+      final fn = cargarSecciones;
+      if (fn is Future<List<YtSection>> Function({bool forzar})) {
+        secciones = await fn(forzar: forzar);
+      } else if (fn is Future<List<YtSection>> Function(bool forzar)) {
+        secciones = await fn(forzar);
+      } else if (fn is Future<List<YtSection>> Function()) {
+        secciones = await fn();
+      } else {
+        secciones = await (fn as dynamic)();
+      }
     } catch (e) {
       error = '$e';
     } finally {
@@ -35,9 +44,9 @@ class YtHomeStore extends ChangeNotifier {
   }
 
   /// Carga solo si no hay nada todavía: al volver a una pestaña ya vista no
-  /// se repite el viaje.
+  /// se repite el viaje y aprovecha la caché.
   Future<void> cargarSiHaceFalta() async {
     if (secciones.isNotEmpty || cargando) return;
-    await cargar();
+    await cargar(forzar: false);
   }
 }

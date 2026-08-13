@@ -36,7 +36,7 @@ class _EstadoDeYtDlpState extends State<EstadoDeYtDlp> {
 
   Future<void> _comprobar() async {
     setState(() => _comprobando = true);
-    final ruta = YtPlayer.findYtDlpBinary()?.path;
+    final ruta = YtPlayer.findYtDlpBinary(refrescar: true)?.path;
     final version = await YtPlayer.versionDeYtDlp();
     if (!mounted) return;
     setState(() {

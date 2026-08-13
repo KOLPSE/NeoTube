@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../core/settings.dart';
-
 /// Los atajos de teclado de la ventana, **para toda la app y una sola vez**.
 ///
 /// ⚠️ Antes vivían dentro de `AppShell`, y ahí estaba el fallo que se notaba
@@ -50,37 +48,12 @@ class AtajosDeReproduccion extends StatefulWidget {
 }
 
 class _AtajosDeReproduccionState extends State<AtajosDeReproduccion> {
-  /// Un nodo propio en vez de `autofocus` a secas: hay que poder recuperar el
-  /// foco a mano al cambiar de modo (ver [_alCambiarDeModo]).
   final FocusNode _nodo = FocusNode(debugLabel: 'atajos');
 
   @override
-  void initState() {
-    super.initState();
-    modoApp.addListener(_alCambiarDeModo);
-  }
-
-  @override
   void dispose() {
-    modoApp.removeListener(_alCambiarDeModo);
     _nodo.dispose();
     super.dispose();
-  }
-
-  /// ⚠️ Al cambiar de modo, el `ExcludeFocus` de `ModeHost` desengancha el foco
-  /// de todo el shell que se va. Si quien lo tenía era un descendiente suyo, el
-  /// foco sube al *scope* raíz — que está **por encima** de este nodo, así que
-  /// las teclas dejarían de llegar aquí y el espacio se quedaría mudo hasta que
-  /// el usuario pulsara algo. Se recupera en cuanto pasa.
-  void _alCambiarDeModo() {
-    if (!mounted) return;
-    // Al final del frame: durante el cambio, `ModeHost` todavía está montando
-    // el shell entrante y pedir foco a mitad no se sostiene.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_nodo.hasFocus && !AtajosDeReproduccion.escribiendo) {
-        _nodo.requestFocus();
-      }
-    });
   }
 
   KeyEventResult _alPulsarTecla(FocusNode node, KeyEvent event) {

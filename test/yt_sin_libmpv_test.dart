@@ -68,4 +68,11 @@ void main() {
     expect(p.cola, isEmpty);
     expect(p.actual, isNull);
   });
+
+  test('findDenoBinary no falla cuando se invoca y refresca', () {
+    final deno = YtPlayer.findDenoBinary(refrescar: true);
+    if (deno != null) {
+      expect(deno.existsSync(), isTrue);
+    }
+  });
 }

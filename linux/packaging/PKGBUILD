@@ -1,0 +1,42 @@
+# Maintainer: KOLPSE <https://github.com/KOLPSE>
+# Receta para el paquete binario de NeoTube en Arch Linux.
+
+pkgname=neotube-bin
+_pkgname=neotube
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Cliente nativo de YouTube Music para escritorio"
+arch=('x86_64')
+url="https://github.com/KOLPSE/NeoTube"
+license=('MIT')
+depends=('gtk3' 'libayatana-appindicator' 'webkit2gtk-4.1' 'mpv')
+optdepends=('gnome-shell-extension-appindicator: icono de bandeja en GNOME')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=('!strip')
+
+_tarball="NeoTube-$pkgver-linux-x86_64"
+source=("$_tarball.tar.gz::$url/releases/download/v$pkgver/$_tarball.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir/$_tarball"
+
+  install -dm755 "$pkgdir/opt/$_pkgname"
+  cp -r data lib "$pkgdir/opt/$_pkgname/"
+  install -Dm755 neotube "$pkgdir/opt/$_pkgname/neotube"
+  install -Dm755 yt-dlp "$pkgdir/opt/$_pkgname/yt-dlp"
+
+  install -dm755 "$pkgdir/usr/bin"
+  ln -s "/opt/$_pkgname/neotube" "$pkgdir/usr/bin/$_pkgname"
+
+  install -Dm644 xyz.neogex.neotube.desktop \
+    "$pkgdir/usr/share/applications/xyz.neogex.neotube.desktop"
+
+  for tamano in 16 24 32 48 64 128 256; do
+    install -Dm644 "icons/${tamano}x${tamano}/neotube.png" \
+      "$pkgdir/usr/share/icons/hicolor/${tamano}x${tamano}/apps/$_pkgname.png"
+  done
+
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

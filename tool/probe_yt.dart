@@ -26,7 +26,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
-import 'package:neofy/core/app_config.dart';
+import 'package:neotube/core/app_config.dart';
 import 'package:path/path.dart' as p;
 
 const _base = 'music.youtube.com';

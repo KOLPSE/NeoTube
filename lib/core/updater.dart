@@ -61,7 +61,7 @@ class Updater extends ChangeNotifier {
   /// Qué hacer cuando no se instala sola. En Linux NeoFy se reparte por el
   /// repositorio pacman propio (ver el README), así que se actualiza con
   /// pacman a secas: nada de ayudantes del AUR, que ya no se usa.
-  static const String comandoDeActualizacion = 'sudo pacman -Syu neofy-bin';
+  static const String comandoDeActualizacion = 'sudo pacman -Syu neotube-bin';
 
   Future<void> buscar() async {
     if (estado == EstadoActualizacion.buscando ||
@@ -146,7 +146,7 @@ class Updater extends ChangeNotifier {
       }
 
       final destino = File(p.join(
-          Directory.systemTemp.path, 'NeoFy-$versionDisponible-setup.exe'));
+          Directory.systemTemp.path, 'NeoTube-$versionDisponible-setup.exe'));
       await destino.writeAsBytes(bytes, flush: true);
       _instalador = destino;
       _cambiar(EstadoActualizacion.listaParaInstalar);

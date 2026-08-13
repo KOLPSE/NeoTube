@@ -28,9 +28,27 @@ class YtSearchScreen extends StatefulWidget {
   State<YtSearchScreen> createState() => _YtSearchScreenState();
 }
 
+sealed class _ElementoDeBusqueda {
+  const _ElementoDeBusqueda();
+}
+
+class _EncabezadoBusqueda extends _ElementoDeBusqueda {
+  const _EncabezadoBusqueda(this.titulo);
+  final String titulo;
+}
+
+class _ItemBusqueda extends _ElementoDeBusqueda {
+  const _ItemBusqueda(this.item);
+  final YtItem item;
+}
+
+class _SeparadorSeccion extends _ElementoDeBusqueda {
+  const _SeparadorSeccion();
+}
+
 class _YtSearchScreenState extends State<YtSearchScreen> {
   final _ctrl = TextEditingController();
-  List<YtSection> _secciones = const [];
+  List<_ElementoDeBusqueda> _elementos = const [];
   bool _buscando = false;
   String? _error;
   bool _buscadoAlgunaVez = false;
@@ -39,6 +57,20 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  static List<_ElementoDeBusqueda> _aplanarResultados(List<YtSection> secciones) {
+    final list = <_ElementoDeBusqueda>[];
+    for (final seccion in secciones) {
+      if (seccion.titulo.isNotEmpty) {
+        list.add(_EncabezadoBusqueda(seccion.titulo));
+      }
+      for (final item in seccion.items) {
+        list.add(_ItemBusqueda(item));
+      }
+      list.add(const _SeparadorSeccion());
+    }
+    return list;
   }
 
   Future<void> _buscar() async {
@@ -52,7 +84,7 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
     try {
       final r = await widget.api.buscar(query);
       if (!mounted) return;
-      setState(() => _secciones = r);
+      setState(() => _elementos = _aplanarResultados(r));
     } catch (e) {
       // La API interna no tiene documentación oficial, así que conviene ver el
       // fallo completo en consola — el mensaje en pantalla se recorta para no
@@ -110,7 +142,7 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
   }
 
   Widget _resultados(ThemeData theme) {
-    if (_secciones.isEmpty) {
+    if (_elementos.isEmpty) {
       return Center(
         child: Text(
           _buscadoAlgunaVez && !_buscando
@@ -123,19 +155,20 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
     }
     return AnimatedBuilder(
       animation: widget.player,
-      builder: (context, _) => ListView(
+      builder: (context, _) => ListView.builder(
         padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-        children: [
-          for (final seccion in _secciones) ...[
-            if (seccion.titulo.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              Text(seccion.titulo, style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
-            ],
-            for (final item in seccion.items) _fila(theme, item),
-            const SizedBox(height: 12),
-          ],
-        ],
+        itemCount: _elementos.length,
+        itemBuilder: (context, index) {
+          final elem = _elementos[index];
+          return switch (elem) {
+            _EncabezadoBusqueda(:final titulo) => Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: Text(titulo, style: theme.textTheme.titleSmall),
+              ),
+            _ItemBusqueda(:final item) => _fila(theme, item),
+            _SeparadorSeccion() => const SizedBox(height: 12),
+          };
+        },
       ),
     );
   }

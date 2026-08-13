@@ -35,12 +35,14 @@ class YtPlaylistScreen extends StatefulWidget {
 class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
   YtColeccion? _coleccion;
   bool _cargando = true;
+  bool _cargandoMas = false;
   String? _error;
+  StreamSubscription<YtColeccion>? _sub;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_cargar());
+    _cargar();
   }
 
   @override
@@ -48,27 +50,60 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
     super.didUpdateWidget(old);
     if (old.item.playlistId != widget.item.playlistId ||
         old.item.browseId != widget.item.browseId) {
-      unawaited(_cargar());
+      _sub?.cancel();
+      _sub = null;
+      _cargar();
     }
   }
 
-  Future<void> _cargar() async {
+  @override
+  void dispose() {
+    _sub?.cancel();
+    _sub = null;
+    super.dispose();
+  }
+
+  void _cargar({bool forzar = false}) {
+    _sub?.cancel();
     setState(() {
       _cargando = true;
+      _cargandoMas = false;
       _error = null;
+      _coleccion = null;
     });
-    try {
-      final c = await widget.api.coleccion(
-        playlistId: widget.item.playlistId,
-        browseId: widget.item.browseId,
-      );
-      if (mounted) setState(() => _coleccion = c);
-    } catch (e) {
-      debugPrint('[NeoTube lista ${widget.item.playlistId}] $e');
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _cargando = false);
-    }
+
+    _sub = widget.api
+        .coleccionProgresiva(
+          playlistId: widget.item.playlistId,
+          browseId: widget.item.browseId,
+          forzar: forzar,
+        )
+        .listen(
+      (c) {
+        if (!mounted) return;
+        setState(() {
+          _coleccion = c;
+          _cargando = false;
+          _cargandoMas = true;
+        });
+      },
+      onError: (e) {
+        debugPrint('[NeoTube lista ${widget.item.playlistId ?? widget.item.browseId}] $e');
+        if (!mounted) return;
+        setState(() {
+          _error = '$e';
+          _cargando = false;
+          _cargandoMas = false;
+        });
+      },
+      onDone: () {
+        if (!mounted) return;
+        setState(() {
+          _cargando = false;
+          _cargandoMas = false;
+        });
+      },
+    );
   }
 
   Future<void> _reproducirDesde(int i) async {
@@ -147,7 +182,7 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
               if (esError) ...[
                 const SizedBox(height: 16),
                 OutlinedButton.icon(
-                  onPressed: () => unawaited(_cargar()),
+                  onPressed: () => _cargar(forzar: true),
                   icon: const Icon(Icons.refresh),
                   label: const Text('Reintentar'),
                 ),
@@ -162,13 +197,32 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
       animation: widget.player,
       builder: (context, _) {
         final sonando = widget.player.actual?.videoId;
+        final totalItems = c.pistas.length + 1 + (_cargandoMas ? 1 : 0);
         return ListView.builder(
           padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
-          // Uno más: la cabecera va dentro del propio scroll para que no se
-          // coma la mitad de la ventana en una lista larga.
-          itemCount: c.pistas.length + 1,
+          // Uno más para la cabecera (+1 si aún carga más trozos)
+          itemCount: totalItems,
           itemBuilder: (context, i) {
             if (i == 0) return _cabecera(theme, c);
+            if (_cargandoMas && i == totalItems - 1) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 8),
+                      Text('Cargando más canciones...'),
+                    ],
+                  ),
+                ),
+              );
+            }
             final t = c.pistas[i - 1];
             final activa = t.videoId == sonando;
             return ListTile(

@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  comprobar:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Dependencias
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Tests
+        run: flutter test
+
+      - name: Comprobar consistencia de versión
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $appConfig = Get-Content lib/core/app_config.dart -Raw
+          if ($appConfig -match "kVersion\s*=\s*'([^']+)'") {
+            $vConfig = $Matches[1]
+          } else {
+            Write-Error "No se pudo extraer kVersion de lib/core/app_config.dart"
+            exit 1
+          }
+
+          $pubspec = Get-Content pubspec.yaml -Raw
+          if ($pubspec -match "(?m)^version:\s*([0-9\.]+)") {
+            $vPubspec = $Matches[1]
+          } else {
+            Write-Error "No se pudo extraer version de pubspec.yaml"
+            exit 1
+          }
+
+          Write-Host "Versión en app_config: $vConfig"
+          Write-Host "Versión en pubspec:    $vPubspec"
+
+          if ($vConfig -ne $vPubspec) {
+            Write-Error "Inconsistencia de versión: app_config ($vConfig) != pubspec ($vPubspec)"
+            exit 1
+          }
+          Write-Host "Las versiones coinciden: $vConfig"
+
+      - name: Comprobar que no queden restos de NeoFy
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $coincidencias = Get-ChildItem -Path lib -Recurse -Filter "*.dart" | Select-String -Pattern "NeoFy"
+          if ($coincidencias) {
+            Write-Host "Se encontraron referencias a 'NeoFy' en lib/:"
+            $coincidencias | ForEach-Object { Write-Host "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
+            Write-Error "Quedan $($coincidencias.Count) referencias a 'NeoFy' en lib/ que deben ser saneadas."
+            exit 1
+          }
+          Write-Host "Comprobación limpia: no hay restos de 'NeoFy' en lib/."
