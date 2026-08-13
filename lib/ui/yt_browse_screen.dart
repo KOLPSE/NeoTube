@@ -137,7 +137,9 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                           widget.player.resolviendo == item.videoId,
                       sonando: item.videoId != null &&
                           widget.player.actual?.videoId == item.videoId,
-                      onTap: () => unawaited(widget.acciones.pulsar(context, item)),
+                      onTap: () => unawaited(
+                        widget.acciones.pulsar(context, item, hermanas: seccion.items),
+                      ),
                       onReproducir: item.esCancion || !item.esNavegable
                           ? null
                           : () =>

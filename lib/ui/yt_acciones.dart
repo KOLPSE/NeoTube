@@ -28,9 +28,13 @@ class YtAcciones {
   final void Function(YtItem) abrir;
 
   /// El tap normal: una canción suena; una lista o un álbum se abren.
-  Future<void> pulsar(BuildContext context, YtItem item) async {
+  Future<void> pulsar(
+    BuildContext context,
+    YtItem item, {
+    List<YtItem>? hermanas,
+  }) async {
     if (item.esCancion) {
-      await reproducirCancion(context, item.comoPista!);
+      await reproducirCancion(context, item.comoPista!, hermanas: hermanas);
       return;
     }
     if (item.tipo == YtTipo.artista) {
@@ -44,9 +48,30 @@ class YtAcciones {
     _avisar(context, 'Este elemento no trae nada que abrir.');
   }
 
-  /// Una canción suelta: suena al momento y su radio se engancha detrás en
-  /// cuanto llegue, para que al acabar siga sonando música.
-  Future<void> reproducirCancion(BuildContext context, YtTrack t) async {
+  /// Una canción suelta (o dentro de una sección/carrusel de [hermanas]):
+  /// Si se pasa [hermanas], se construye una cola con todas las canciones
+  /// de esa sección y se arranca desde la pulsada. Si no se pasa, suena la pista
+  /// suelta y se le engancha su radio detrás.
+  Future<void> reproducirCancion(
+    BuildContext context,
+    YtTrack t, {
+    List<YtItem>? hermanas,
+  }) async {
+    if (hermanas != null && hermanas.isNotEmpty) {
+      final pistas = hermanas
+          .where((it) => it.esCancion && it.comoPista != null)
+          .map((it) => it.comoPista!)
+          .toList();
+      if (pistas.isNotEmpty) {
+        final indice = pistas.indexWhere((p) => p.videoId == t.videoId);
+        final desde = indice >= 0 ? indice : 0;
+        try {
+          await player.reproducirLista(pistas, desde: desde);
+        } catch (_) {}
+        return;
+      }
+    }
+
     try {
       await player.reproducirPista(t);
     } catch (_) {
