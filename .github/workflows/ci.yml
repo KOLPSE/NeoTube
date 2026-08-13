@@ -68,9 +68,17 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
-          $coincidencias = Get-ChildItem -Path lib -Recurse -Filter "*.dart" | Select-String -Pattern "NeoFy"
+          # Sensible a mayusculas y sin comentarios: 'neofy' en minusculas es la
+          # carpeta de datos antigua (app_config.dart la usa a proposito para
+          # migrar las cookies), y los comentarios historicos que expliquen por
+          # que NeoFy hacia algo de otra forma son documentacion util, no un
+          # residuo. Lo que esto tiene que pillar es "NeoFy" colandose en un
+          # texto que ve el usuario.
+          $coincidencias = Get-ChildItem -Path lib -Recurse -Filter "*.dart" |
+            Select-String -Pattern "NeoFy" -CaseSensitive |
+            Where-Object { $_.Line.Trim() -notmatch '^/{2,3}' }
           if ($coincidencias) {
-            Write-Host "Se encontraron referencias a 'NeoFy' en lib/:"
+            Write-Host "Se encontraron referencias a 'NeoFy' en lib/ (fuera de comentarios):"
             $coincidencias | ForEach-Object { Write-Host "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
             Write-Error "Quedan $($coincidencias.Count) referencias a 'NeoFy' en lib/ que deben ser saneadas."
             exit 1
