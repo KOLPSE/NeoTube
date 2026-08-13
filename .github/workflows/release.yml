@@ -147,10 +147,11 @@ jobs:
     steps:
       - name: Dependencias del sistema
         # mpv y python se omiten a propósito: mpv debe ser resuelto por el PKGBUILD y python no hace falta.
+        # pacman-contrib proporciona repo-add para la base de datos del repositorio pacman.
         run: |
           pacman -Syu --noconfirm --needed \
             gtk3 libayatana-appindicator webkit2gtk-4.1 \
-            base-devel sudo github-cli xorg-server-xvfb xorg-xauth dbus
+            base-devel sudo github-cli pacman-contrib xorg-server-xvfb xorg-xauth dbus
 
       - uses: actions/checkout@v4
 
@@ -252,3 +253,60 @@ jobs:
           pkg="$(ls /tmp/pkg/neotube-bin-*.pkg.tar.zst)"
           gh release upload "$tag" "$pkg" --clobber
           echo "Paquete Arch subido a $tag"
+
+      - name: Publicar el repositorio pacman
+        run: |
+          pkg="$(ls /tmp/pkg/neotube-bin-*.pkg.tar.zst)"
+          nombre="$(basename "$pkg")"
+
+          cd /tmp/pkg
+          repo-add neotube.db.tar.gz "$nombre"
+          # repo-add deja neotube.db y neotube.files como enlaces simbólicos, y una
+          # release de GitHub no guarda enlaces: se suben como ficheros reales,
+          # que son además los nombres exactos que pide pacman.
+          #
+          # ⚠️ Hay que BORRAR el enlace antes de copiar. Con el enlace puesto,
+          # `cp neotube.db.tar.gz neotube.db` resuelve origen y destino al mismo
+          # fichero y falla con "are the same file".
+          rm -f neotube.db neotube.files
+          cp neotube.db.tar.gz neotube.db
+          cp neotube.files.tar.gz neotube.files
+
+          # ⚠️ --latest=false NO es opcional. Si esta release quedara marcada
+          # como la última, releases/latest devolvería la etiqueta "repo" y el
+          # actualizador de la app (core/updater.dart) la leería como número de
+          # versión, dejando de ver las versiones de verdad.
+          # Las notas van por fichero: escritas en línea, sus saltos romperían
+          # el bloque de YAML que contiene este script.
+          cat > /tmp/notas-repo.md <<'NOTAS'
+          Esta release **no contiene una versión de NeoTube**: es el repositorio
+          pacman para Arch. Su etiqueta no cambia nunca, para que la url que se
+          pone en `pacman.conf` siga siendo válida versión tras versión. Las
+          versiones de verdad están en la lista de releases.
+
+          En `/etc/pacman.conf`, al final:
+
+              [neotube]
+              SigLevel = Optional TrustAll
+              Server = https://github.com/KOLPSE/NeoTube/releases/download/repo
+
+          Y después:
+
+              sudo pacman -Sy neotube-bin
+
+          A partir de ahí se actualiza con el resto del sistema en cada
+          `sudo pacman -Syu`.
+          NOTAS
+          # El heredoc va indentado para no romper el YAML; se quita aquí.
+          sed -i 's/^          //' /tmp/notas-repo.md
+
+          if ! gh release view repo >/dev/null 2>&1; then
+            gh release create repo --latest=false \
+              --title 'Repositorio pacman para Arch (no es una versión)' \
+              --notes-file /tmp/notas-repo.md
+          fi
+
+          gh release upload repo \
+            "$nombre" neotube.db neotube.files neotube.db.tar.gz neotube.files.tar.gz \
+            --clobber
+          echo "  repositorio pacman actualizado con $nombre"
