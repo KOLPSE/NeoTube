@@ -401,7 +401,19 @@ class YtPlayer extends ChangeNotifier {
     try {
       await alEmpezarAReproducir?.call();
       final url = await _resolverUrl(t.videoId);
-      await mpv.open(Media(url));
+      try {
+        await mpv.open(Media(url));
+      } catch (_) {
+        // libmpv no pudo abrir esta URL en concreto (hipo de red, borde de CDN
+        // o bloqueo transitorio de YouTube, no necesariamente que el vídeo
+        // esté roto): se invalida la URL en caché y se pide una fresca a
+        // yt-dlp antes de rendirse. "Siguiente canción" arreglaba esto a mano
+        // justamente porque disparaba una resolución nueva.
+        _urls.remove(t.videoId);
+        _enVuelo.remove(t.videoId);
+        final urlFresca = await _resolverUrl(t.videoId);
+        await mpv.open(Media(urlFresca));
+      }
       _adelantarSiguiente();
     } catch (e) {
       error = '$e';
