@@ -10,9 +10,11 @@ rara es la correcta, y qué pasa si se «arregla» por lo obvio. Casi todo lo de
 verificado contra la API real con `tool/probe_yt.dart`, no deducido de documentación —
 porque documentación no hay.
 
-> **Estado de este repositorio:** es el código movido, no una app que arranque todavía.
-> Falta `lib/main.dart`, los runners de Windows y Linux, y el empaquetado. La sección
-> [Lo que falta para que arranque](#lo-que-falta-para-que-arranque) tiene la lista exacta.
+> **Estado de este repositorio:** arranca de verdad, en Windows y en Linux. Tiene
+> instalador de Windows (Inno Setup) y paquete + repositorio pacman para Arch Linux,
+> publicados en [Releases](https://github.com/KOLPSE/NeoTube/releases). La sección
+> [Cómo se compila y se publica](#9-cómo-se-compila-y-se-publica) explica el proceso
+> completo, incluido `sudo pacman -S neotube-bin`.
 
 ---
 
@@ -311,48 +313,90 @@ porque el código movido todavía tiene las costuras:
 
 ---
 
-## 8. La capa de escritorio no viene
+## 8. La capa de escritorio
 
-`mpris.dart`, `smtc.dart` y `reproductor_del_sistema.dart` **no están en este árbol a
-propósito**: hablan el vocabulario de `Track`, el modelo de *Spotify*, y traerlos habría
-significado traer también los 356 líneas de DTOs de la Web API a un repositorio de YouTube.
+`lib/core/sistema.dart`, `mpris.dart`, `smtc.dart` y `media_keys.dart` reexpresan
+`EstadoDelSistema` directamente sobre `YtTrack` — nada del modelo `Track` de Spotify se
+arrastró desde NeoFy, que era el motivo por el que esta capa se dejó fuera al mover el
+código (356 líneas de DTOs de la Web API que aquí no pintaban nada).
 
-En NeoFy, con NeoTube delante, se construía un `Track` **al vuelo** desde el `YtTrack` que
-sonaba, justo para poder hablar con MPRIS y con SMTC. Al portarlo aquí, lo natural es
-reexpresar `EstadoDelSistema` directamente sobre `YtTrack` y no arrastrar nada de Spotify.
-
-Cuando se haga, hay una trampa que hay que respetar:
+La trampa que había que respetar, ya resuelta:
 
 > ⚠️ **El `mpris:trackid` es una ruta de objeto D-Bus** y solo admite `[A-Za-z0-9_]`. Los
 > `videoId` de YouTube **traen `-` con frecuencia**: sin sanearlo, D-Bus rechaza el
 > diccionario entero y el widget del escritorio se queda sin título y sin carátula.
+> `mpris.dart` sanea el id con `replaceAll(RegExp(r'[^A-Za-z0-9_]'), '_')` antes de
+> construir la ruta del objeto.
+
+En Windows, SMTC (`system_media.cpp`/`.h`) habla con WinRT **sin C++/WinRT**:
+`RoGetActivationFactory` + `HSTRING` a mano, porque la carátula que se le pasa al panel del
+sistema se envuelve con `CreateRandomAccessStreamOverStream` sobre `SHCreateStreamOnFileEx`
+—la única vía síncrona; la de `StorageFile` es asíncrona y esperarla bloquearía el hilo de
+la ventana.
 
 ---
 
-## 9. Lo que falta para que arranque
+## 9. Cómo se compila y se publica
 
-Esta pasada movió el código y escribió este documento. Para que sea una app:
+### El orden de arranque, en `lib/main.dart`
 
-1. **`lib/main.dart`.** No viene: el de NeoFy arrancaba las dos apps a la vez, librespot
-   incluido. Lo que hay que rescatar de él es el orden de inicialización —
-   `WebviewWindow.isWebviewAvailable()` antes de nada, `MediaKit.ensureInitialized()` dentro de
-   un `try`/`catch` que apague el reproductor si falta libmpv, y solo después `runApp()`— y el
-   punto de entrada, que es `NeoTubeShell`.
-2. **Runners de Windows y Linux** (`flutter create --platforms=windows,linux .` sobre este
-   árbol), más la línea de `WEBKIT_DISABLE_COMPOSITING_MODE` en `linux/runner/main.cc` y el
-   copiado de yt-dlp en `linux/CMakeLists.txt`.
-3. **Limpiar la infraestructura heredada**: `updater.dart` apunta a las releases de NeoFy;
-   `app_config.dart` guarda `clientId` de Spotify, `volumenNeoTube` y `modo`;
-   `settings_dialog.dart` trae `ReiniciarAudioDeNeoFy`, que aquí no tiene sentido.
-4. **Borrar el conmutador de modos** (`app_mode.dart`, `mode_host.dart`,
-   `mode_toggle_text.dart`) y la importación de `app_mode` en `settings.dart`.
-5. **La capa de escritorio**, según la sección 8.
-6. **Empaquetado y CI**, cuando lo anterior arranque.
+No es negociable, cada paso rompe algo distinto si se mueve:
 
-Los tres tests que vienen (`test/yt_parseo_test.dart`, `yt_tarjeta_test.dart`,
-`yt_sin_libmpv_test.dart`) ya apuntan a `package:neotube/` y deberían pasar en cuanto haya
-`pubspec.lock`. La red está mockeada en los tests: **lo que de verdad comprueba la API es
-`tool/probe_yt.dart`**, que habla con la cuenta real.
+1. `WidgetsFlutterBinding.ensureInitialized()` — antes que nada: el constructor de
+   `Settings` toca `PaintingBinding.instance.imageCache`.
+2. `if (runWebViewTitleBarWidget(args)) return;` — en Windows, `desktop_webview_window`
+   relanza este mismo ejecutable con argumentos especiales para pintar solo la barra de
+   título de su ventana de login. Si se entra por aquí, no es una segunda instancia de
+   NeoTube, es esa ventanita.
+3. `try { MediaKit.ensureInitialized(); } catch (e) { YtPlayer.libmpvDisponible = false; ... }`
+   — **antes** de construir ningún `YtPlayer`: su lista de inicialización lee
+   `libmpvDisponible` directamente. El `debugPrint` de ese catch contiene la cadena literal
+   `'sin libmpv'`, que el job `arch` del pipeline de release busca con `grep` para demostrar
+   que el paquete de verdad declara `mpv` como dependencia.
+4. Instancia única por socket TCP local (puerto `53331`, distinto del `53330` de NeoFy para
+   que las dos convivan): enlazar, y si el puerto ya está ocupado, **intentar conectar**
+   antes de rendirse — si tampoco hay nadie al otro lado, seguir adelante en vez de
+   desaparecer en silencio.
+5. `windowManager` (tamaño, `setPreventClose(true)` — siempre junto con `onWindowClose`, o
+   la ventana queda imposible de cerrar).
+6. `AppConfig.load()`, `YtAuth().loadStored()` **antes** de `runApp()` (`YtAuth` no notifica
+   a nadie; si las cookies llegan después del primer frame, la interfaz no se entera).
+
+### Empaquetado
+
+- **Windows**: `tool\build_installer.ps1` compila en release y llama a Inno Setup
+  (`installer\neotube.iss`) para producir `NeoTube-<version>-windows-x64.exe`.
+- **Linux**: `tool/build_linux_bundle.sh` compila en release y arma un tarball con el
+  `.desktop`, los iconos y `yt-dlp`. `linux/packaging/PKGBUILD` empaqueta ese tarball para
+  Arch (`neotube-bin`); `mpv` va en su `depends=` — **no** se instala a mano en ningún paso
+  de comprobación, tiene que llegar resolviéndolo el propio gestor de paquetes, o el
+  problema del `dlopen` (sección 5) no se detecta.
+- **`.github/workflows/release.yml`** dispara con cada tag `v*` y hace las dos cosas a la
+  vez: compila el instalador de Windows, y en un contenedor `archlinux:latest` monta el
+  paquete, lo instala de verdad con `pacman -U` y **arranca la app** (`dbus-run-session
+  xvfb-run`) para comprobar que sobrevive 25 s y que el log no contiene `sin libmpv`. Es el
+  único paso de todo el pipeline que ejecuta el binario; todo lo demás mira ficheros y
+  enlazado estático, que es justo lo que no detecta un `dlopen`.
+- El mismo job publica el paquete además en una release de etiqueta fija `repo`, con la
+  base de datos que genera `repo-add`, para que sea un repositorio pacman de verdad:
+
+  ```
+  # /etc/pacman.conf
+  [neotube]
+  SigLevel = Optional TrustAll
+  Server = https://github.com/KOLPSE/NeoTube/releases/download/repo
+  ```
+
+  y luego `sudo pacman -Sy neotube-bin`; a partir de ahí se actualiza solo con
+  `pacman -Syu`, igual que cualquier otro paquete del sistema. ⚠️ Esa release lleva
+  `--latest=false` a propósito: `updater.dart` lee `releases/latest` de la API de GitHub, y
+  si la release del repositorio quedara marcada como la más reciente, el comprobador de
+  actualizaciones de la propia app dejaría de ver las versiones de verdad.
+
+Los tres tests (`test/yt_parseo_test.dart`, `yt_tarjeta_test.dart`, `yt_sin_libmpv_test.dart`,
+más `yt_cache_test.dart` y `yt_error_reproduccion_test.dart`) corren con `flutter test` y la
+red mockeada. **Lo que de verdad comprueba la API es `tool/probe_yt.dart`**, que habla con la
+cuenta real y solo lee: se puede lanzar con la app abierta.
 
 ---
 

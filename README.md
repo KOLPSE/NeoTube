@@ -7,10 +7,8 @@ verdad, resuelve el stream de cada pista con **yt-dlp** y lo reproduce con **med
 (libmpv). Sin servidor propio, sin clave de API y sin OAuth: te logueas una vez en una ventana
 de Google y ya.
 
-> **Estado:** este repositorio es el código recién separado de
-> [NeoFy](https://github.com/KOLPSE/NeoFy), donde NeoTube era el segundo modo de la app.
-> Todavía **no arranca por su cuenta**: falta `lib/main.dart`, los runners de Windows y Linux
-> y el empaquetado.
+> **Estado:** arranca de verdad, en Windows y en Linux. Instalador de Windows y paquete de
+> Arch Linux publicados en [Releases](https://github.com/KOLPSE/NeoTube/releases).
 
 ## Antes de tocar nada, lee [`CONTEXTO.md`](CONTEXTO.md)
 
@@ -22,10 +20,24 @@ La más cara, como aperitivo: `APISID` y `SAPISID` son cookies distintas, y firm
 primera no da un 401 — da un **200 con la sesión anónima**, así que todo parece funcionar
 salvo lo único que depende de saber quién eres.
 
-## Qué falta
+## Cómo instalarlo
 
-La lista exacta está en la sección [«Lo que falta para que
-arranque»](CONTEXTO.md#9-lo-que-falta-para-que-arranque) de `CONTEXTO.md`.
+- **Windows:** descarga el instalador `.exe` de la [última
+  release](https://github.com/KOLPSE/NeoTube/releases/latest).
+- **Arch Linux:** añade el repositorio a `/etc/pacman.conf`:
+
+  ```
+  [neotube]
+  SigLevel = Optional TrustAll
+  Server = https://github.com/KOLPSE/NeoTube/releases/download/repo
+  ```
+
+  y luego `sudo pacman -Sy neotube-bin`. A partir de ahí se actualiza solo con
+  `sudo pacman -Syu`.
+- **Otras distros de Linux:** el tarball genérico está también en la última release.
+
+Los detalles del pipeline de compilación y publicación están en la sección [«Cómo se
+compila y se publica»](CONTEXTO.md#9-cómo-se-compila-y-se-publica) de `CONTEXTO.md`.
 
 ## Licencia
 
