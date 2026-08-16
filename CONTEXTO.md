@@ -504,6 +504,12 @@ No es negociable, cada paso rompe algo distinto si se mueve:
   xvfb-run`) para comprobar que sobrevive 25 s y que el log no contiene `sin libmpv`. Es el
   único paso de todo el pipeline que ejecuta el binario; todo lo demás mira ficheros y
   enlazado estático, que es justo lo que no detecta un `dlopen`.
+- ⚠️ **El cuerpo de la release sale de `RELEASE_NOTES.md`, y hay que reescribirlo en cada
+  versión.** Si se olvida, la release nueva se publica con las notas de la anterior y nadie
+  lo nota hasta que alguien las lee. Va por fichero y no por el mensaje del tag porque
+  `softprops/action-gh-release` no usa el mensaje del tag, y porque así se revisa en el mismo
+  *diff* que el código. Los dos pasos que suben ficheros (Windows y Linux) lo declaran **los
+  dos a propósito**: corren en paralelo y cualquiera puede ser el que cree la release.
 - El mismo job publica el paquete además en una release de etiqueta fija `repo`, con la
   base de datos que genera `repo-add`, para que sea un repositorio pacman de verdad:
 
