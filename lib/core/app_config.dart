@@ -12,6 +12,9 @@ const String kVersion = '0.1.4';
 /// Repositorio de donde salen las actualizaciones.
 const String kRepoGitHub = 'KOLPSE/NeoTube';
 
+/// Client ID de la aplicación de Discord de NeoTube (Developer Portal).
+const String kDiscordClientId = '1538661228040298556';
+
 Directory? _appDataDir;
 Directory? _cacheDir;
 
@@ -72,9 +75,17 @@ class AppConfig {
   /// Volumen de NeoTube, 0..100.
   int volumenNeoTube;
 
+  /// Si Discord Rich Presence está encendido.
+  bool discordRpcEnabled;
+
+  /// Client ID de la app de Discord. Por defecto el de NeoTube.
+  String discordClientId;
+
   AppConfig({
     this.performanceMode = false,
     this.volumenNeoTube = 60,
+    this.discordRpcEnabled = false,
+    this.discordClientId = kDiscordClientId,
   });
 
   static File get _file => File(p.join(appDataDir().path, 'config.json'));
@@ -87,6 +98,8 @@ class AppConfig {
       return AppConfig(
         performanceMode: (map['performanceMode'] as bool?) ?? false,
         volumenNeoTube: (map['volumenNeoTube'] as int?) ?? 60,
+        discordRpcEnabled: (map['discordRpcEnabled'] as bool?) ?? false,
+        discordClientId: (map['discordClientId'] as String?) ?? kDiscordClientId,
       );
     } catch (_) {
       return AppConfig();
@@ -97,6 +110,8 @@ class AppConfig {
     await _file.writeAsString(jsonEncode({
       'performanceMode': performanceMode,
       'volumenNeoTube': volumenNeoTube,
+      'discordRpcEnabled': discordRpcEnabled,
+      'discordClientId': discordClientId,
     }));
   }
 }

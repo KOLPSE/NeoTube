@@ -100,13 +100,17 @@ class YtMusicApi {
   /// las secciones ("Escuchado recientemente", "Mezclas para ti") lleguen ya
   /// traducidos desde Google en vez de en inglés: son texto que pintamos tal
   /// cual, no hay nada que traducir por nuestra cuenta.
-  static final String _hl = () {
+  /// Públicos porque `yt_stream.dart` pide el `player` con el mismo idioma:
+  /// así el `reason` de una pista que no se puede reproducir llega traducido y
+  /// se le puede enseñar al usuario tal cual, igual que los títulos de las
+  /// secciones.
+  static final String hl = () {
     final l = Platform.localeName; // "es_ES.UTF-8", "en-US"…
     final corte = l.indexOf(RegExp(r'[_\-.]'));
     return corte > 0 ? l.substring(0, corte) : 'en';
   }();
 
-  static final String _gl = () {
+  static final String gl = () {
     final m = RegExp(r'^[a-zA-Z]{2}[_\-]([A-Za-z]{2})').firstMatch(Platform.localeName);
     return m == null ? 'US' : m.group(1)!.toUpperCase();
   }();
@@ -116,8 +120,8 @@ class YtMusicApi {
           'client': {
             'clientName': 'WEB_REMIX',
             'clientVersion': '1.20241201.01.00',
-            'hl': _hl,
-            'gl': _gl,
+            'hl': hl,
+            'gl': gl,
             if (_visitorData != null) 'visitorData': _visitorData,
           },
           // Sin esto, una cuenta con el modo restringido activado en el

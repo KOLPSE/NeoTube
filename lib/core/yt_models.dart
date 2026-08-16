@@ -29,6 +29,24 @@ class YtTrack {
   final String artista;
   final String? miniatura;
 
+  /// La misma pista con carátula, si no traía.
+  ///
+  /// ⚠️ Existe por los **álbumes**: sus filas no traen `thumbnail` (enseñan el
+  /// número de pista en su lugar), a diferencia de las de una playlist, que sí.
+  /// Comprobado contra la API real — 0 de 8 filas de un álbum traen miniatura
+  /// propia, y la portada del álbum sí está en la cabecera. Sin esto, abrir un
+  /// álbum dejaba todas las canciones sin carátula, y con ellas la barra de
+  /// reproducción y el Rich Presence de Discord.
+  YtTrack conMiniatura(String? url) => miniatura != null || url == null
+      ? this
+      : YtTrack(
+          videoId: videoId,
+          titulo: titulo,
+          artista: artista,
+          miniatura: url,
+          duracion: duracion,
+        );
+
   /// Solo cuando la API la da (las filas de una lista traen `fixedColumns`
   /// con el `mm:ss`; las tarjetas de la portada, no).
   final Duration? duracion;
@@ -106,12 +124,17 @@ class YtSection {
 
 /// El resultado de abrir una lista o un álbum: la cabecera y sus pistas.
 class YtColeccion {
-  const YtColeccion({
+  /// Las pistas que no traigan carátula heredan la de la colección — ver
+  /// [YtTrack.conMiniatura], que explica por qué hace falta. Se hace aquí, en
+  /// el constructor, para que no haya forma de armar una colección saltándoselo.
+  YtColeccion({
     required this.titulo,
     required this.subtitulo,
-    required this.pistas,
+    required List<YtTrack> pistas,
     this.miniatura,
-  });
+  }) : pistas = miniatura == null
+            ? pistas
+            : pistas.map((p) => p.conMiniatura(miniatura)).toList(growable: false);
 
   final String titulo;
   final String subtitulo;

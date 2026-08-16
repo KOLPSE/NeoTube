@@ -590,4 +590,54 @@ void main() {
       expect(YtMusicApi.extraerTokenContinuacionDeBrowse(j), isNull);
     });
   });
+group('carátulas de un álbum', () {
+    /// Las filas de un **álbum** no traen `thumbnail` —enseñan el número de
+    /// pista—, a diferencia de las de una playlist. Comprobado contra la API
+    /// real: 0 de 8 filas de un álbum traen miniatura propia, y la portada solo
+    /// está en la cabecera. Sin heredarla, abrir un álbum dejaba todas las
+    /// canciones sin carátula, y con ellas la barra de reproducción y Discord.
+    test('las pistas sin carátula heredan la de la colección', () {
+      final c = YtColeccion(
+        titulo: 'MOTOMAMI',
+        subtitulo: 'ROSALÍA',
+        miniatura: 'https://ejemplo/portada.jpg',
+        pistas: const [
+          YtTrack(videoId: 'aaaaaaaaaaa', titulo: 'SAOKO', artista: 'ROSALÍA'),
+          YtTrack(videoId: 'bbbbbbbbbbb', titulo: 'CANDY', artista: 'ROSALÍA'),
+        ],
+      );
+
+      expect(c.pistas.every((p) => p.miniatura == 'https://ejemplo/portada.jpg'), isTrue);
+    });
+
+    test('la carátula propia de una pista gana a la de la colección', () {
+      final c = YtColeccion(
+        titulo: 'Mi lista',
+        subtitulo: '',
+        miniatura: 'https://ejemplo/portada.jpg',
+        pistas: const [
+          YtTrack(
+            videoId: 'aaaaaaaaaaa',
+            titulo: 'Una',
+            artista: 'Alguien',
+            miniatura: 'https://ejemplo/suya.jpg',
+          ),
+        ],
+      );
+
+      expect(c.pistas.single.miniatura, 'https://ejemplo/suya.jpg');
+    });
+
+    test('sin portada de colección, las pistas se quedan como estaban', () {
+      final c = YtColeccion(
+        titulo: 'Mezcla',
+        subtitulo: '',
+        pistas: const [
+          YtTrack(videoId: 'aaaaaaaaaaa', titulo: 'Una', artista: 'Alguien'),
+        ],
+      );
+
+      expect(c.pistas.single.miniatura, isNull);
+    });
+  });
 }

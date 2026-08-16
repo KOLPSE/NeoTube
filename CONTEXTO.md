@@ -22,16 +22,17 @@ porque documentación no hay.
 
 YouTube Music no tiene API pública para terceros. NeoTube habla con **la misma API interna
 que usa la web** (`youtubei/v1`), autenticándose con **las cookies de una sesión de verdad**,
-y reproduce el audio resolviendo la URL del stream con **yt-dlp** y sonándola con
-**media_kit** (libmpv). No hay servidor propio, no hay clave de API, no hay OAuth.
+y reproduce el audio pidiéndole la URL del stream **a esa misma API** y sonándola con
+**media_kit** (libmpv). No hay servidor propio, no hay clave de API, no hay OAuth, y —desde
+que resolver dejó de ser un subproceso— tampoco hace falta ejecutar JavaScript de nadie.
 
 ```
-   WebView de login          youtubei/v1                yt-dlp              media_kit
+   WebView de login          youtubei/v1            youtubei/v1/player      media_kit
   (una sola vez) ─────► cookies + SAPISIDHASH ─────► URL del stream ─────► altavoces
-     yt_auth.dart            yt_music_api.dart         yt_player.dart      yt_player.dart
+     yt_auth.dart            yt_music_api.dart         yt_stream.dart      yt_player.dart
 ```
 
-Tres piezas, tres ficheros. Todo lo demás es interfaz.
+Cuatro piezas, cuatro ficheros. Todo lo demás es interfaz.
 
 ---
 
@@ -44,8 +45,10 @@ Tres piezas, tres ficheros. Todo lo demás es interfaz.
 | `yt_auth.dart` | La sesión. Abre la WebView, captura las cookies y firma cada petición. |
 | `yt_music_api.dart` | El cliente de `youtubei/v1`: buscar, portada, biblioteca, listas, radios. 762 líneas de las cuales la mitad son parseo defensivo, y hay motivo para cada rama. |
 | `yt_models.dart` | `YtTrack`, `YtItem`, `YtSection`, `YtColeccion`, `YtTipo`. |
-| `yt_player.dart` | La cola y el sonido: yt-dlp + libmpv. |
+| `yt_player.dart` | La cola y el sonido: libmpv, y el plan B de yt-dlp. |
+| `yt_stream.dart` | Resuelve la URL del stream por `youtubei/v1/player`. Dart puro, sin Flutter dentro. |
 | `yt_home_store.dart` | Estado de una pantalla de secciones (portada, explorar, biblioteca). |
+| `discord_rpc.dart` | Rich Presence por IPC nativo de Discord. Apagado por defecto. |
 
 ### La interfaz (`lib/ui/`)
 
@@ -176,11 +179,104 @@ ocurrió.
 
 ---
 
-## 5. El sonido: yt-dlp + libmpv
+## 5. El sonido: `youtubei/v1/player` + libmpv (y yt-dlp de plan B)
 
-### yt-dlp es un sidecar, y sin él no suena nada
+### Los clientes móviles devuelven URLs sin cifrar, y por eso no hace falta ejecutar JavaScript
 
-`yt-dlp` resuelve la URL real del stream de cada pista. `YtPlayer.findYtDlpBinary()` lo busca
+Resolver la URL del stream es **una llamada más a la API interna** (`yt_stream.dart`), no un
+subproceso. El detalle del que depende todo:
+
+| cliente | formatos de audio | qué hace falta para abrirlos |
+|---|---|---|
+| `WEB_REMIX` (el del resto de la app) | 4, **todos en `signatureCipher`** | ejecutar el JS del reproductor de YouTube |
+| `ANDROID_VR` | 5, **todos con `url` directa** | nada |
+
+Pedirle `player` a `WEB_REMIX` devuelve 200 y unos formatos de aspecto perfectamente normal;
+lo que no traen es una URL que se pueda abrir. Descifrarlos es lo que obliga a arrastrar un
+runtime de JavaScript (Deno, en el caso de yt-dlp) o un DOM falso más un PoToken de BotGuard
+(es lo que hace `pear-desktop` con `happy-dom` + `bgutils-js`). Con un cliente móvil no hay
+nada que descifrar: ni `signatureCipher`, ni parámetro `n`.
+
+Medido en Windows sobre la misma pista: **~120 ms de mediana contra los ~2700 ms de yt-dlp**.
+Esa diferencia era el "se queda pensando" entre canciones.
+
+### ⚠️ Que la URL se pueda descargar no significa que libmpv la acepte
+
+**La trampa más cara de esta parte.** Se eligió primero el cliente `IOS`: respondía igual de
+rápido, con URLs igual de directas, y se comprobó además bajando los primeros megas por HTTP
+—llegaban a 14 MB/s—. Y aun así **no sonaba absolutamente nada**.
+
+googlevideo le contesta `403 Forbidden` a ffmpeg con las URLs de `IOS`, mientras le da `206` a
+una petición normal **desde el mismo proceso, con la misma URL y en el mismo segundo**. Con
+`ANDROID_VR` (el que acaba usando yt-dlp — mira el `c=` de sus URLs) suena.
+
+La consecuencia práctica, que vale para cualquier cambio futuro aquí: **una URL de audio no se
+valida descargándola.** Hay que abrirla con el reproductor de verdad. La única forma de verlo
+es `flutter run` con `MPVLogLevel.debug` en el constructor del `Player` y mirar el log de mpv;
+por HTTP todo parecía correcto, y el `Failed to open` de `media_kit` no dice el motivo.
+
+### ⚠️ `ANDROID_VR` sin `visitorData` es "confirma que no eres un bot"
+
+Y aquí está el segundo escalón, que el primero tapaba. Con el cliente correcto pero sin
+`visitorData`, la API contesta `LOGIN_REQUIRED` con el motivo *"Inicia sesión para confirmar
+que no eres un bot"* — **y lo hace tenga o no tenga las cookies de la cuenta delante**, así que
+el mensaje engaña: no le falta tu sesión, le falta saber que hay un visitante detrás.
+
+Medido: **0 de 4 pistas sin `visitorData`, 4 de 4 con él.** Añadir las cabeceras de yt-dlp
+(`X-Youtube-Client-Name: 28`, `X-Youtube-Client-Version`, `Origin`) y copiar su descripción de
+cliente exacta **no basta por sí solo**: sigue siendo 0 de 4. El `visitorData` es la pieza.
+
+Se saca como lo saca yt-dlp: de la página de un vídeo cualquiera, que lo trae incrustado en su
+JavaScript. Se cachea para toda la vida del proceso y solo se vuelve a pedir si Google lo
+rechaza, en cuyo caso se reintenta una vez antes de caer al plan B.
+
+**Cómo se averiguó, y cómo averiguar el siguiente:** `yt-dlp --print-traffic` vuelca la
+petición entera que manda —cabeceras, cuerpo y todo—. yt-dlp ya tiene resuelto este problema;
+cuando algo aquí deje de funcionar, ese comando es el primer sitio donde mirar, no el último.
+
+### ⚠️ Esta petición va anónima, y mandar la sesión rompe la reproducción
+
+**Lo más contraintuitivo de todo el proyecto.** `youtubei/v1/player` se pide **sin `Cookie`,
+sin `Authorization` y sin `SAPISIDHASH`** — es lo único de la app que no se autentica, y no es
+un descuido.
+
+Mandar las cookies de la cuenta **resuelve perfectamente**: 200, formatos con `url` directa,
+mismos ~120 ms. Pero la URL que devuelve viene envenenada, y googlevideo le contesta
+`403 Forbidden` a ffmpeg al abrirla. Al parecer, decir «soy una app de Oculus Quest» y
+adjuntar a la vez una sesión web de escritorio es una contradicción que Google acepta al
+emitir la URL y castiga al servirla. yt-dlp tampoco manda cookies con los clientes móviles.
+
+Medido, con el resto del código idéntico:
+
+| | resoluciones | fallos de libmpv | reintentos por yt-dlp |
+|---|---|---|---|
+| **con** cookies de cuenta | todas OK | **todas** | 6 de 6, a 2,6 s cada una |
+| **sin** cookies de cuenta | todas OK | **0** | **0** |
+
+Perder la sesión aquí no cuesta nada: reproducir no depende de la cuenta. `yt_music_api.dart`
+sigue firmando todo lo demás, que es donde importa saber quién eres.
+
+Por eso esta petición **no reutiliza `_postBytes()` de `yt_music_api.dart`**: aquella firma
+siempre y manda `Origin` y `X-Origin`, y aquí las tres cosas sobran o hacen daño. (Si alguna
+vez hiciera falta firmar algo contra `www.youtube.com`, el `SAPISIDHASH` va con origen
+`https://music.youtube.com` igualmente; firmarlo con `www` es `400 INVALID_ARGUMENT`.)
+
+### `yt_stream.dart` es Dart puro, y tiene que seguir siéndolo
+
+No importa `yt_auth.dart` (que arrastraría `desktop_webview_window`) ni
+`package:flutter/...`: recibe las cabeceras de sesión como **función**
+(`YtAuth.cabecerasDeSesion`). Con un plugin de Flutter en el árbol de imports `dart run` no
+compila, y sin `dart run` este fichero se queda sin sonda — que es la única forma de comprobar
+que YouTube no ha cambiado nada, porque `flutter test` no puede hacer red.
+
+Es función y no valor porque el `SAPISIDHASH` lleva dentro el epoch en que se calculó:
+guardarlo sería firmar todas las pistas de la sesión con la hora del arranque.
+
+### yt-dlp sigue estando, ahora como plan B
+
+Se cae a él cuando la vía rápida falla, salvo si el fallo es del vídeo y no del método
+(`YtStreamException.reintentarConYtDlp`): con un vídeo retirado o privado, lanzar el proceso
+solo sirve para esperar tres segundos y volver a fallar. `YtPlayer.findYtDlpBinary()` lo busca
 en tres sitios, por orden:
 
 1. junto al ejecutable (lo que se empaqueta),
@@ -208,8 +304,11 @@ estar más fresco**.
 - Ajustes enseña la versión y la ruta del yt-dlp que se está usando (`yt_ajustes.dart`), por lo
   mismo.
 
-Las URLs resueltas se cachean **45 minutos** (`YtPlayer._vidaDeUrl`): caducan solas, así que
-guardarlas más tiempo es guardarse un fallo para luego.
+Las URLs resueltas se cachean **45 minutos** (`YtPlayer._vidaDeUrl`): caducan solas (traen su
+propio `expire`, unas 6 h), así que guardarlas más tiempo es guardarse un fallo para luego.
+
+La siguiente pista se sigue resolviendo mientras suena la actual, aunque ahora cueste ~120 ms:
+es barato, y quita el silencio entre pistas también cuando toca caer al plan B.
 
 ### ⚠️ libmpv se abre con `dlopen`, así que `ldd` no la ve
 
@@ -333,6 +432,34 @@ En Windows, SMTC (`system_media.cpp`/`.h`) habla con WinRT **sin C++/WinRT**:
 sistema se envuelve con `CreateRandomAccessStreamOverStream` sobre `SHCreateStreamOnFileEx`
 —la única vía síncrona; la de `StorageFile` es asíncrona y esperarla bloquearía el hilo de
 la ventana.
+
+### Discord Rich Presence (`discord_rpc.dart`)
+
+Portado de NeoFy (`spotify-native/lib/core/discord_rpc.dart`) y adaptado a `YtTrack`. Habla
+el **IPC nativo de Discord sin paquete de terceros**: named pipe (`\\.\pipe\discord-ipc-N`)
+en Windows y socket Unix en Linux, con los mensajes empaquetados a mano —opcode y longitud
+en dos `uint32` little-endian, y detrás el JSON—. Fuera de esas dos plataformas el
+transporte es un *no-op*, así que la app no se entera de que no hay Discord.
+
+Está apagado por defecto (`AppConfig.discordRpcEnabled`) y se enciende en Ajustes. El
+`clientId` es configurable pero viene con el de NeoTube puesto (`kDiscordClientId`).
+
+Lo que cambió respecto al de NeoFy, y por qué:
+
+- **Fuera `sync_id` y `flags: 48`.** Son lo que hace que Discord pinte el botón de
+  «Reproducir en Spotify», y necesitan un id de track de Spotify. Aquí no significan nada.
+- **El `end` del timestamp va condicionado a que haya duración.** `Track.durationMs` de
+  Spotify siempre venía; `YtTrack.duracion` es **nullable**, y mandar
+  `end == start` deja la barra de progreso de Discord en un estado absurdo.
+- El asset grande es la carátula de la pista y el pequeño el logo.
+
+> ⚠️ **`kDiscordAssetLogo` tiene que coincidir *exactamente* con el asset del Developer
+> Portal, mayúsculas incluidas.** Si no coincide, Discord **no falla ni avisa**: la presencia
+> sale sin imagen y ya. Estuvo puesto `'Logo'` mientras el asset se llamaba `logo`, y así se
+> vio: todo lo demás correcto y el minilogo ausente.
+>
+> El nombre real se consulta sin entrar al portal, porque la lista es pública:
+> `curl https://discord.com/api/v9/oauth2/applications/<clientId>/assets`
 
 ---
 

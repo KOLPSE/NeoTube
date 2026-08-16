@@ -65,62 +65,86 @@ class _DialogoAjustes extends StatelessWidget {
       title: const Text('Ajustes'),
       content: SizedBox(
         width: 380,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Se repinta con cada muestra del monitor (cada 3 s); es lo único
-            // vivo del diálogo.
-            AnimatedBuilder(
-              animation: monitor,
-              builder: (context, _) {
-                final uso = monitor.uso;
-                return Row(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Se repinta con cada muestra del monitor (cada 3 s); es lo único
+              // vivo del diálogo.
+              AnimatedBuilder(
+                animation: monitor,
+                builder: (context, _) {
+                  final uso = monitor.uso;
+                  return Row(
+                    children: [
+                      Expanded(
+                        child: _Medida(
+                          icono: Icons.memory,
+                          etiqueta: 'Memoria',
+                          valor: UsoDeRecursos.mb(uso.total),
+                        ),
+                      ),
+                      Expanded(
+                        child: _Medida(
+                          icono: Icons.speed,
+                          etiqueta: 'CPU',
+                          valor: '${uso.cpu.toStringAsFixed(1)} %',
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+              const Divider(height: 28),
+              AnimatedBuilder(
+                animation: settings,
+                builder: (context, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: _Medida(
-                        icono: Icons.memory,
-                        etiqueta: 'Memoria',
-                        valor: UsoDeRecursos.mb(uso.total),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: settings.performanceMode,
+                      onChanged: (v) => unawaited(settings.setPerformanceMode(v)),
+                      title: const Text('Modo rendimiento'),
+                      subtitle: Text(
+                        'Sustituye las carátulas por mosaicos de color y apaga el '
+                        'lector de metadatos. El audio no se toca.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                     ),
-                    Expanded(
-                      child: _Medida(
-                        icono: Icons.speed,
-                        etiqueta: 'CPU',
-                        valor: '${uso.cpu.toStringAsFixed(1)} %',
+                    const Divider(height: 12),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: settings.discordRpcEnabled,
+                      onChanged: (v) => unawaited(settings.setDiscordRpcEnabled(v)),
+                      title: const Text('Mostrar en Discord (Rich Presence)'),
+                      subtitle: Text(
+                        'Enseña en tu perfil de Discord la canción que suena, la '
+                        'siguiente de la cola y un botón a GitHub.',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                     ),
+                    if (settings.discordRpcEnabled) ...[
+                      const SizedBox(height: 8),
+                      _CampoDiscordClientId(settings: settings),
+                    ],
                   ],
-                );
-              },
-            ),
-            const Divider(height: 28),
-            AnimatedBuilder(
-              animation: settings,
-              builder: (context, _) => SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                value: settings.performanceMode,
-                onChanged: (v) => unawaited(settings.setPerformanceMode(v)),
-                title: const Text('Modo rendimiento'),
-                subtitle: Text(
-                  'Sustituye las carátulas por mosaicos de color y apaga el '
-                  'lector de metadatos. El audio no se toca.',
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                 ),
               ),
-            ),
-            for (final bloque in propiosDelModo) ...[
+              for (final bloque in propiosDelModo) ...[
+                const Divider(height: 12),
+                bloque,
+              ],
               const Divider(height: 12),
-              bloque,
+              _Actualizaciones(
+                updater: updater,
+                onSalirParaActualizar: onSalirParaActualizar,
+              ),
             ],
-            const Divider(height: 12),
-            _Actualizaciones(
-              updater: updater,
-              onSalirParaActualizar: onSalirParaActualizar,
-            ),
-          ],
+          ),
         ),
       ),
       actions: [
@@ -257,6 +281,71 @@ class _Medida extends StatelessWidget {
               ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
         ),
       ],
+    );
+  }
+}
+
+class _CampoDiscordClientId extends StatefulWidget {
+  const _CampoDiscordClientId({required this.settings});
+
+  final Settings settings;
+
+  @override
+  State<_CampoDiscordClientId> createState() => _CampoDiscordClientIdState();
+}
+
+class _CampoDiscordClientIdState extends State<_CampoDiscordClientId> {
+  late final TextEditingController _controller;
+  late final FocusNode _foco;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.settings.discordClientId);
+    _foco = FocusNode()..addListener(_alPerderElFoco);
+  }
+
+  void _alPerderElFoco() {
+    if (!_foco.hasFocus) _guardar();
+  }
+
+  void _guardar() => unawaited(widget.settings.setDiscordClientId(_controller.text));
+
+  @override
+  void didUpdateWidget(covariant _CampoDiscordClientId oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.settings.discordClientId != _controller.text) {
+      _controller.text = widget.settings.discordClientId;
+    }
+  }
+
+  @override
+  void dispose() {
+    _foco.removeListener(_alPerderElFoco);
+    _foco.dispose();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TextField(
+      controller: _controller,
+      focusNode: _foco,
+      decoration: InputDecoration(
+        labelText: 'Client ID de Discord',
+        hintText: 'Pega aquí el Client ID de tu aplicación',
+        helperText:
+            'Crea una app en el Discord Developer Portal con un asset llamado "logo" '
+            '(en minuscula: Discord distingue mayusculas)',
+        helperMaxLines: 2,
+        helperStyle: theme.textTheme.bodySmall
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        isDense: true,
+        border: const OutlineInputBorder(),
+      ),
+      onSubmitted: (_) => _guardar(),
     );
   }
 }

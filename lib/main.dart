@@ -10,6 +10,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'core/app_config.dart';
 import 'core/art_cache.dart';
+import 'core/discord_rpc.dart';
 import 'core/media_keys.dart';
 import 'core/mpris.dart';
 import 'core/resource_monitor.dart';
@@ -17,6 +18,7 @@ import 'core/settings.dart';
 import 'core/smtc.dart';
 import 'core/updater.dart';
 import 'core/yt_auth.dart';
+import 'core/yt_models.dart';
 import 'core/yt_music_api.dart';
 import 'core/yt_player.dart';
 import 'ui/atajos.dart';
@@ -142,7 +144,9 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
   late final ResourceMonitor _ram = ResourceMonitor(
     pidsDeSidecars: () => const <int?>[],
   );
-  late final Settings _settings = Settings(widget.config);
+  late final Settings _settings = Settings(widget.config)
+    ..onCambioDiscord = _alCambiarDiscord;
+  late final DiscordRpc _discordRpc = DiscordRpc();
   final Updater _updater = Updater();
 
   bool _bandejaDisponible = false;
@@ -214,6 +218,28 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
   void _avisarAlSistema() {
     _mpris.notificarCambio();
     _smtc.notificarCambio();
+    _discordRpc.actualizarActividad(
+      track: _player.actual,
+      sonando: _player.sonando,
+      progresoMs: _player.posicion.inMilliseconds,
+      duracionMs: _player.duracion.inMilliseconds,
+      obtenerCola: _colaDiscord,
+    );
+  }
+
+  Future<List<YtTrack>> _colaDiscord() async {
+    final i = _player.indice;
+    if (i < 0 || i + 1 >= _player.cola.length) return const [];
+    return _player.cola.sublist(i + 1);
+  }
+
+  void _alCambiarDiscord(bool activo, String clientId) {
+    if (activo && clientId.isNotEmpty) {
+      _discordRpc.start(clientId);
+      _avisarAlSistema();
+    } else {
+      unawaited(_discordRpc.stop());
+    }
   }
 
   StreamSubscription<bool>? _subSonando;
@@ -226,6 +252,9 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     _mediaKeys.start();
     unawaited(_mpris.start());
     _smtc.start();
+    if (_settings.discordRpcEnabled && _settings.discordClientId.isNotEmpty) {
+      _discordRpc.start(_settings.discordClientId);
+    }
     _player.addListener(_avisarAlSistema);
     _subSonando = _player.cambiosDeSonando.listen((_) => _avisarAlSistema());
     _player.onSalto = (ms) {
@@ -250,6 +279,7 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
 
   Future<void> _quit() async {
     await _player.stop();
+    await _discordRpc.stop();
     await _mpris.stop();
     await _smtc.stop();
     try {
@@ -362,6 +392,7 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     _player.dispose();
     _ram.dispose();
     _settings.dispose();
+    _discordRpc.dispose();
     _updater.dispose();
     super.dispose();
   }

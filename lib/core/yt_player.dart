@@ -6,7 +6,10 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
 import 'procesos.dart' show sufijoEjecutable;
+import 'yt_auth.dart';
 import 'yt_models.dart';
+import 'yt_music_api.dart' show YtMusicApi;
+import 'yt_stream.dart';
 
 class YtPlayerException implements Exception {
   final String message;
@@ -18,9 +21,9 @@ class YtPlayerException implements Exception {
 /// Reproduce audio de YouTube sin necesitar cuenta Premium, **con cola**.
 ///
 /// Dos piezas separadas, como en el resto de la app: **resolver** la URL del
-/// stream de audio (yt-dlp, un binario que se invoca una vez por pista y no un
-/// servidor persistente como `metadata-sidecar`) y **reproducirla**
-/// (`media_kit`, que envuelve libmpv y sabe abrir esa URL directamente).
+/// stream de audio (`yt_stream.dart`, una llamada a la misma API interna que ya
+/// usa el resto de la app; ver ahí por qué) y **reproducirla** (`media_kit`,
+/// que envuelve libmpv y sabe abrir esa URL directamente).
 ///
 /// A diferencia de `PlayerController` (que sondea la Web API de Spotify porque
 /// el audio suena en otro proceso, `librespot`, controlado en remoto), aquí el
@@ -34,16 +37,23 @@ class YtPlayerException implements Exception {
 /// buscar otra cosa, y la barra inferior necesita saber si hay "siguiente"
 /// para encender su botón. Vive donde vive el audio.
 ///
-/// ## La espera de yt-dlp
+/// ## La espera de resolver
 ///
-/// Resolver una URL tarda entre medio segundo y dos. Encadenado a cada cambio
-/// de canción eso es un silencio audible entre pistas, así que la siguiente se
-/// resuelve **mientras suena la actual** y se guarda en [_urls]. Las URLs que
-/// devuelve Google caducan (traen su propio `expire`), de ahí que la caché
-/// tenga fecha de caducidad propia y conservadora.
+/// Resolver una URL por la API cuesta unos 90 ms, pero el plan B (yt-dlp) se va
+/// a casi tres segundos, así que la siguiente pista se sigue resolviendo
+/// **mientras suena la actual** y se guarda en [_urls]: es barato y quita el
+/// silencio entre pistas también cuando toca caer al plan B. Las URLs que
+/// devuelve Google caducan (traen su propio `expire`, unas 6 h), de ahí que la
+/// caché tenga fecha de caducidad propia y conservadora.
 class YtPlayer extends ChangeNotifier {
-  YtPlayer({int volumenInicial = 60})
-      : _volumen = ValueNotifier<int>(volumenInicial.clamp(0, 100)),
+  /// [auth] es opcional porque el resolutor funciona sin sesión (ver
+  /// `YtStreamResolver.sesion`), y así los tests que solo comprueban la cola o
+  /// la ausencia de libmpv no tienen que montar una. `main.dart` sí la pasa.
+  YtPlayer({YtAuth? auth, int volumenInicial = 60})
+      // PRUEBA: sin las cookies de la cuenta, exactamente como yt-dlp. Ver
+      // `YtStreamResolver.sesion`.
+      : _stream = YtStreamResolver(),
+        _volumen = ValueNotifier<int>(volumenInicial.clamp(0, 100)),
         _mpv = libmpvDisponible ? Player() : null {
     final mpv = _mpv;
     if (mpv == null) {
@@ -60,7 +70,15 @@ class YtPlayer extends ChangeNotifier {
     _subCompletado = mpv.stream.completed.listen((terminada) {
       if (terminada && !_cambiando && cola.isNotEmpty) unawaited(siguiente(automatico: true));
     });
+    // La duración no se sabe hasta que libmpv ha abierto el medio, unos cientos
+    // de milisegundos después de que la pista ya conste como "la actual". Sin
+    // avisar de esto, todo lo que dependa de saber cuánto dura la canción se
+    // queda con el cero de antes: el panel del sistema y, sobre todo, la barra
+    // de progreso de Discord, que sin duración no llega a dibujarse.
+    _subDuracion = mpv.stream.duration.listen((_) => notifyListeners());
     _subError = mpv.stream.error.listen((e) {
+      debugPrint('NeoTube: libmpv informa de un error: $e '
+          '(abriendo=$_pistaAbriendo, reintentoUsado=$_reintentoUsado)');
       if (_pistaAbriendo != null && !_reintentoUsado) {
         _reintentoUsado = true;
         final pista = actual;
@@ -108,8 +126,14 @@ class YtPlayer extends ChangeNotifier {
   /// haya reproductor.
   final Player? _mpv;
 
+  /// Quien resuelve las URLs por la vía rápida. yt-dlp se queda de plan B, más
+  /// abajo.
+  final YtStreamResolver _stream;
+
   StreamSubscription<bool>? _subCompletado;
   StreamSubscription<String>? _subError;
+  StreamSubscription<Duration>? _subDuracion;
+  StreamSubscription<PlayerLog>? _subLog;
 
   /// ¿Puede sonar algo? `false` solo cuando falta libmpv (ver
   /// [libmpvDisponible]). Con esto puesto a `false`, NeoTube se enseña
@@ -294,15 +318,11 @@ class YtPlayer extends ChangeNotifier {
     }
   }
 
-  /// Resuelve la URL del stream de solo-audio de un vídeo con yt-dlp.
+  /// Resuelve la URL del stream de solo-audio de un vídeo, con caché.
   ///
-  /// Una invocación, no un proceso vigilado: `yt-dlp -f bestaudio -g` imprime
-  /// la URL resuelta en stdout y termina solo. `Process.run` (sin
-  /// `runInShell`, que es el que de verdad abriría una shell) no pasa por
-  /// ninguna shell del sistema.
-  ///
-  /// Deduplica resoluciones concurrentes mediante [_enVuelo] para no lanzar
-  /// múltiples procesos de yt-dlp para la misma pista.
+  /// Deduplica resoluciones concurrentes mediante [_enVuelo]: el adelanto de
+  /// [_adelantarSiguiente] y una pulsación del usuario sobre la misma pista no
+  /// deben salir dos veces a la vez.
   Future<String> _resolverUrl(String videoId) async {
     final guardada = _urls[videoId];
     if (guardada != null && guardada.hasta.isAfter(DateTime.now())) return guardada.url;
@@ -322,7 +342,32 @@ class YtPlayer extends ChangeNotifier {
     }
   }
 
+  /// Primero la API, y solo si falla, yt-dlp.
+  ///
+  /// El plan B se conserva por lo que la vía rápida no cubre: vídeos con
+  /// restricción de edad, o el día que YouTube cambie algo y el cliente `IOS`
+  /// deje de servir. Cuesta unos 2,6 s frente a los ~90 ms de la vía rápida,
+  /// así que es exactamente eso, un plan B, y no un camino que se tome a
+  /// menudo.
+  ///
+  /// Cuando el problema es del vídeo y no del método (retirado, privado,
+  /// bloqueado), [YtStreamException.reintentarConYtDlp] viene a `false` y no se
+  /// lanza el proceso: fallaría igual, tres segundos más tarde.
   Future<String> _resolverUrlDirecto(String videoId) async {
+    try {
+      return await _stream.resolver(videoId, hl: YtMusicApi.hl, gl: YtMusicApi.gl);
+    } on YtStreamException catch (e) {
+      if (!e.reintentarConYtDlp) throw YtPlayerException('$e');
+      if (findYtDlpBinary() == null) throw YtPlayerException('$e');
+      debugPrint('NeoTube: la vía rápida falló ($e). Probando con yt-dlp.');
+      return _resolverConYtDlp(videoId);
+    }
+  }
+
+  /// El plan B de toda la vida: `yt-dlp -f bestaudio -g` imprime la URL
+  /// resuelta en stdout y termina solo. `Process.run` (sin `runInShell`, que es
+  /// el que de verdad abriría una shell) no pasa por ninguna shell del sistema.
+  Future<String> _resolverConYtDlp(String videoId) async {
     final bin = findYtDlpBinary();
     if (bin == null) {
       throw YtPlayerException(
@@ -415,15 +460,24 @@ class YtPlayer extends ChangeNotifier {
     resolviendo = t.videoId;
     error = null;
     notifyListeners();
+    final reloj = Stopwatch()..start();
     try {
       await alEmpezarAReproducir?.call();
       final url = await _resolverUrl(t.videoId);
+      // Una línea por cambio de pista, con el número que justifica todo este
+      // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
+      // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
+      debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
       await mpv.open(Media(url));
       _adelantarSiguiente();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
       });
-    } catch (e) {
+    } catch (e, pila) {
+      // Sin esto, una pista que no arranca no deja **ni una línea** en el log:
+      // el error acaba en `error` y de ahí a la interfaz, y quien mira la
+      // consola no ve nada de nada. Es exactamente cómo se perdió una tarde.
+      debugPrint('NeoTube: no se pudo abrir ${t.videoId}: $e\n$pila');
       _pistaAbriendo = null;
       error = '$e';
       rethrow;
@@ -434,13 +488,33 @@ class YtPlayer extends ChangeNotifier {
     }
   }
 
-  /// Reintenta abrir la pista con una URL fresca cuando el stream asíncrono
-  /// de libmpv falla al abrir el medio inicial.
+  /// Reintenta abrir la pista **por la otra vía** cuando libmpv rechaza la URL.
+  ///
+  /// Pedirle otra URL al mismo sitio no sirve de nada cuando el problema no es
+  /// que la URL esté caducada sino que googlevideo le contesta `403` a ffmpeg:
+  /// la siguiente sale igual y falla igual, que es exactamente lo que se veía
+  /// —dos `Failed to open` seguidos por pista, con `reintentoUsado` en `false`
+  /// y luego en `true`—.
+  ///
+  /// Así que el reintento va por yt-dlp. Cuesta sus ~2,6 s, pero solo se paga
+  /// cuando la vía rápida ya ha fallado, y es la que se ha visto sonar cuando
+  /// la otra no. Si tampoco hay yt-dlp, se vuelve a intentar como antes: es
+  /// mejor que rendirse sin probar.
   Future<void> _reintentarConUrlFresca(YtTrack t) async {
     _urls.remove(t.videoId);
     _enVuelo.remove(t.videoId);
+    // La URL que acaba de rechazar libmpv la emitió la identidad de visitante
+    // actual, así que se tira: si sigue en pie, las siguientes pistas saldrían
+    // con el mismo problema y todas acabarían pagando el plan B. Las URLs ya
+    // adelantadas también se van, que se emitieron con esa misma identidad.
+    _stream.renovarVisitante();
+    _urls.clear();
     try {
-      final urlFresca = await _resolverUrl(t.videoId);
+      final urlFresca = findYtDlpBinary() != null
+          ? await _resolverConYtDlp(t.videoId)
+          : await _resolverUrl(t.videoId);
+      debugPrint('NeoTube: reintento de ${t.videoId} por '
+          '${findYtDlpBinary() != null ? 'yt-dlp' : 'la vía rápida'}');
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
       if (actual?.videoId != t.videoId) return;
@@ -580,6 +654,9 @@ class YtPlayer extends ChangeNotifier {
     _temporizadorAbriendo?.cancel();
     unawaited(_subCompletado?.cancel());
     unawaited(_subError?.cancel());
+    unawaited(_subDuracion?.cancel());
+    unawaited(_subLog?.cancel());
+    _stream.dispose();
     unawaited(_mpv?.dispose());
     _volumen.dispose();
     super.dispose();

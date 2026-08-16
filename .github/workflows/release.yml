@@ -76,6 +76,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/NeoTube-*-windows-x64.exe
+          # Las dos subidas ponen el mismo cuerpo a propósito: corren en
+          # paralelo y cualquiera de las dos puede ser la que cree la release.
+          body_path: RELEASE_NOTES.md
 
   linux:
     runs-on: ubuntu-latest
@@ -132,6 +135,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/NeoTube-*-linux-x86_64.tar.gz
+          body_path: RELEASE_NOTES.md
 
   arch:
     needs: linux
