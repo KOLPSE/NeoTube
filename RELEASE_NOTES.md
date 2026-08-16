@@ -1,19 +1,22 @@
-## ⚠️ Sobre los cortes de reproducción
+## ⚠️ Sobre los cortes de reproducción — léelo antes de instalar
 
-**YouTube rechaza de vez en cuando la URL del stream ya emitida**, y cuando pasa esa canción
-tarda unos segundos de más en arrancar. No es un fallo del programa ni de tu conexión: es del
-lado de YouTube, y le ocurre igual a otras herramientas —se ha comprobado que pasa también
-usando `yt-dlp` directamente, sin NeoTube de por medio—.
+**YouTube rechaza a veces la URL del stream que él mismo acaba de emitir.** Cuando pasa, esa
+canción tarda **~2,5 s en arrancar en vez de ~0,1 s**. Suena igual: NeoTube lo detecta y
+reintenta solo por otra vía.
 
-NeoTube lo resuelve solo: cuando ocurre, reintenta por otra vía y la canción suena igual.
-Lo único que notarás es que esa pista concreta tarda ~2,5 s en empezar en vez de ~0,1 s.
+**Va a rachas, y las malas son bastante malas.** Medido durante el desarrollo: hay tramos de
+17 canciones seguidas sin un solo fallo, y tramos donde falla **una de cada dos**. No es un
+goteo constante; es a temporadas.
 
-No hace falta que hagas nada. Si te pasa muy seguido, cerrar y abrir la app renueva la
-identidad con la que se piden los streams y suele bastar.
+No es un fallo de NeoTube ni de tu conexión: ocurre igual usando `yt-dlp` directamente, sin
+NeoTube de por medio. Pero **la causa exacta no está identificada**, así que tampoco vamos a
+jurar que sea solo cosa de YouTube.
 
-> La causa exacta no está identificada. Hay una mitigación puesta —se renueva la identidad de
-> visitante al detectar el problema y cada 30 minutos— pero no está demostrado que la elimine
-> del todo, así que se prefiere avisar antes que prometer.
+Hay una mitigación puesta —renovar la identidad de visitante al detectar el problema y cada
+30 minutos— y hay que decir que **no funcionó**: medida contra el mismo escenario, la tasa de
+fallos no bajó. Se queda porque no hace daño, no porque lo arregle.
+
+Si te toca una racha mala, cerrar y abrir la app a veces la corta.
 
 ---
 

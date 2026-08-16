@@ -6,7 +6,38 @@ on:
       - 'v*'
 
 jobs:
+  # Lo primero de todo, y a propósito: si el tag no cuadra con la versión del
+  # código, no se compila nada.
+  #
+  # ⚠️ La versión sale de `kVersion` en `app_config.dart` — **no de
+  # `pubspec.yaml`** —, y de ahí salen los nombres de los artefactos, el
+  # instalador y la comparación del actualizador. Subir solo `pubspec.yaml` y
+  # etiquetar `v0.1.5` publicaba una release con ficheros llamados `0.1.4` y un
+  # actualizador en bucle: veía la 0.1.5 como nueva y se bajaba un instalador
+  # que no existía con ese nombre. Pasó de verdad al publicar la 0.1.5.
+  #
+  # `ci.yml` ya comparaba `kVersion` con `pubspec.yaml`, pero corre en el push
+  # de la rama, no en el del tag, así que empujando los dos a la vez la release
+  # salía igual mientras CI fallaba en paralelo. Esto lo cierra.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: El tag, kVersion y pubspec tienen que decir lo mismo
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          kver="$(grep -oP "kVersion\s*=\s*'\K[^']+" lib/core/app_config.dart)"
+          pver="$(grep -oP '^version:\s*\K[0-9.]+' pubspec.yaml)"
+          pkgver="$(grep -oP '^pkgver=\K[0-9.]+' linux/packaging/PKGBUILD)"
+          echo "tag=$tag  kVersion=$kver  pubspec=$pver  PKGBUILD=$pkgver"
+          fallo=0
+          [ "$tag" = "$kver" ] || { echo "::error::kVersion es $kver y el tag v$tag"; fallo=1; }
+          [ "$tag" = "$pver" ] || { echo "::error::pubspec es $pver y el tag v$tag"; fallo=1; }
+          [ "$tag" = "$pkgver" ] || { echo "::error::PKGBUILD es $pkgver y el tag v$tag"; fallo=1; }
+          exit $fallo
+
   windows:
+    needs: version
     runs-on: windows-latest
     permissions:
       contents: write
@@ -81,6 +112,7 @@ jobs:
           body_path: RELEASE_NOTES.md
 
   linux:
+    needs: version
     runs-on: ubuntu-latest
     permissions:
       contents: write
