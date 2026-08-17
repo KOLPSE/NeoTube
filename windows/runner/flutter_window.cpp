@@ -132,6 +132,9 @@ void FlutterWindow::UnregisterMediaKeys() {
 
 void FlutterWindow::StartSystemMedia() {
   system_media_.Start(GetHandle(), kSystemMediaCommandMessage);
+  thumb_bar_.Start(GetHandle(), [this](ComandoMultimedia comando) {
+    EnviarComando(comando, 0);
+  });
 }
 
 void FlutterWindow::OnSystemMediaCall(
@@ -163,6 +166,7 @@ void FlutterWindow::OnSystemMediaCall(
   estado.posicion_ms = LeerEntero(*mapa, "posicionMs");
 
   system_media_.Update(estado);
+  thumb_bar_.Update(estado);
   result->Success();
 }
 
@@ -205,6 +209,7 @@ void FlutterWindow::EnviarComando(ComandoMultimedia comando,
 
 void FlutterWindow::OnDestroy() {
   system_media_.Stop();
+  thumb_bar_.Stop();
   system_media_channel_ = nullptr;
   UnregisterMediaKeys();
   media_keys_channel_ = nullptr;
@@ -247,6 +252,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   if (message == kSystemMediaCommandMessage) {
     EnviarComando(static_cast<ComandoMultimedia>(wparam),
                   static_cast<int64_t>(lparam));
+    return 0;
+  }
+
+  if (thumb_bar_.MessageHandler(message, wparam, lparam)) {
     return 0;
   }
 

@@ -167,6 +167,44 @@ class YtPlayer extends ChangeNotifier {
   /// interfaz qué lista está sonando.
   String? contexto;
 
+  /// Modo aleatorio, como el de Spotify: una vez activado, se queda activado
+  /// (no es "barajar esta lista una vez") y afecta a la próxima lista que se
+  /// ponga a sonar también. [_colaSinBarajar] guarda el orden real para poder
+  /// volver a él al desactivarlo, sin tener que volver a pedir nada a la API.
+  bool _aleatorio = false;
+  bool get aleatorio => _aleatorio;
+  List<YtTrack> _colaSinBarajar = const [];
+
+  /// Enciende o apaga el aleatorio. La pista que suena ahora se queda donde
+  /// está (no se corta lo que se está oyendo); lo que cambia es qué viene
+  /// después.
+  void alternarAleatorio() {
+    _aleatorio = !_aleatorio;
+    if (cola.isEmpty) {
+      notifyListeners();
+      return;
+    }
+    final pistaActual = actual;
+    if (_aleatorio) {
+      _colaSinBarajar = List.unmodifiable(cola);
+      final resto = [...cola];
+      if (indice >= 0 && indice < resto.length) resto.removeAt(indice);
+      resto.shuffle();
+      cola = List.unmodifiable(pistaActual == null ? resto : [pistaActual, ...resto]);
+      indice = pistaActual == null ? -1 : 0;
+    } else {
+      if (_colaSinBarajar.isNotEmpty) {
+        cola = _colaSinBarajar;
+        indice = pistaActual == null
+            ? -1
+            : cola.indexWhere((t) => t.videoId == pistaActual.videoId);
+        if (indice < 0) indice = 0;
+      }
+      _colaSinBarajar = const [];
+    }
+    notifyListeners();
+  }
+
   YtTrack? get actual => (indice >= 0 && indice < cola.length) ? cola[indice] : null;
   bool get hayNada => actual == null;
   bool get puedeSaltar => indice + 1 < cola.length;
@@ -423,9 +461,17 @@ class YtPlayer extends ChangeNotifier {
     if (_cambiando && resolviendo == pistaDeseada.videoId && actual?.videoId == pistaDeseada.videoId) {
       return;
     }
-    cola = List.unmodifiable(pistas);
     this.contexto = contexto;
-    indice = indiceDeseado;
+    if (_aleatorio) {
+      _colaSinBarajar = List.unmodifiable(pistas);
+      final resto = [...pistas]..removeAt(indiceDeseado);
+      resto.shuffle();
+      cola = List.unmodifiable([pistaDeseada, ...resto]);
+      indice = 0;
+    } else {
+      cola = List.unmodifiable(pistas);
+      indice = indiceDeseado;
+    }
     await _abrirActual();
   }
 
@@ -445,6 +491,12 @@ class YtPlayer extends ChangeNotifier {
     final nuevas = pistas.where((t) => vistos.add(t.videoId)).toList();
     if (nuevas.isEmpty) return;
     cola = List.unmodifiable([...cola, ...nuevas]);
+    // Si el aleatorio está activo, [_colaSinBarajar] es lo que se restaura al
+    // apagarlo: sin esto, las pistas añadidas aquí (la radio de una canción
+    // suelta) desaparecerían de golpe la próxima vez que se apague.
+    if (_aleatorio && _colaSinBarajar.isNotEmpty) {
+      _colaSinBarajar = List.unmodifiable([..._colaSinBarajar, ...nuevas]);
+    }
     notifyListeners();
     _adelantarSiguiente();
   }
@@ -468,7 +520,7 @@ class YtPlayer extends ChangeNotifier {
       // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
       // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
       debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
-      await mpv.open(Media(url));
+      await mpv.open(Media(url, httpHeaders: YtStreamResolver.cabecerasDeReproduccion));
       _adelantarSiguiente();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
@@ -518,7 +570,7 @@ class YtPlayer extends ChangeNotifier {
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
       if (actual?.videoId != t.videoId) return;
-      await _mpv?.open(Media(urlFresca));
+      await _mpv?.open(Media(urlFresca, httpHeaders: YtStreamResolver.cabecerasDeReproduccion));
       _temporizadorAbriendo?.cancel();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
@@ -646,6 +698,7 @@ class YtPlayer extends ChangeNotifier {
     indice = -1;
     contexto = null;
     error = null;
+    _colaSinBarajar = const [];
     notifyListeners();
   }
 

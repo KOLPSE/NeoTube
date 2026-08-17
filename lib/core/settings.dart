@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
 import 'app_config.dart';
+import 'resource_monitor.dart';
 
 /// ¿Está encendido el modo rendimiento?
 ///
@@ -84,6 +85,10 @@ class Settings extends ChangeNotifier {
       // hace que cualquier imagen que quedara se redecodifique en cada frame.
       cache.maximumSizeBytes = 1 << 20; // 1 MB
       cache.maximumSize = 20;
+      // Vaciar la caché de Dart no basta: sin esto, Windows no le devuelve esas
+      // páginas al sistema y el uso de RAM que se ve desde fuera no baja nada
+      // (ver el porqué en ResourceMonitor.devolverMemoriaAlSistema).
+      ResourceMonitor.devolverMemoriaAlSistema(const <int?>[]);
     } else {
       // 8 MB siguen sobrando de largo: una miniatura de fila decodificada a
       // 40 px ocupa unos 14 KB, o sea que caben quinientas.

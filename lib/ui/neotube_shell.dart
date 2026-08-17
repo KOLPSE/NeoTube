@@ -70,7 +70,7 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
       ({bool forzar = false}) => widget.api.browseSections(YtMusicApi.browseIdExplorar, forzar: forzar));
   // La biblioteca no es un `browseId`, son cuatro: playlists, álbumes,
   // canciones y artistas viven en endpoints distintos.
-  late final YtHomeStore _biblioteca = YtHomeStore(widget.api.biblioteca);
+  late final YtHomeStore _biblioteca = YtHomeStore.progresivo(widget.api.bibliotecaProgresiva);
 
   late final YtAcciones _acciones = YtAcciones(
     api: widget.api,
@@ -534,6 +534,12 @@ class _BarraInferior extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
+                    IconButton(
+                      icon: const Icon(Icons.shuffle),
+                      tooltip: player.aleatorio ? 'Aleatorio: activado' : 'Aleatorio',
+                      color: player.aleatorio ? theme.colorScheme.primary : null,
+                      onPressed: player.alternarAleatorio,
+                    ),
                     IconButton(
                       icon: const Icon(Icons.skip_previous),
                       tooltip: 'Anterior',

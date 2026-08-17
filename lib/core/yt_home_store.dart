@@ -10,9 +10,16 @@ import 'yt_models.dart';
 /// endpoints distintos), y encajar eso en un campo de texto obligaba a poner
 /// la excepción dentro del store. Con una función, cada pantalla trae la suya.
 class YtHomeStore extends ChangeNotifier {
-  YtHomeStore(this.cargarSecciones);
+  YtHomeStore(this.cargarSecciones) : cargarProgresivo = null;
 
-  final Function cargarSecciones;
+  /// Como el constructor normal, pero para un origen que puede ir entregando
+  /// secciones por trozos (hoy, la biblioteca): la pantalla deja de esperar a
+  /// que **todo** esté listo y pinta cada tira en cuanto llega la suya.
+  YtHomeStore.progresivo(Stream<List<YtSection>> Function({bool forzar}) this.cargarProgresivo)
+      : cargarSecciones = null;
+
+  final Function? cargarSecciones;
+  final Stream<List<YtSection>> Function({bool forzar})? cargarProgresivo;
 
   List<YtSection> secciones = const [];
   bool cargando = false;
@@ -25,7 +32,15 @@ class YtHomeStore extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final fn = cargarSecciones;
+      final progresivo = cargarProgresivo;
+      if (progresivo != null) {
+        await for (final parcial in progresivo(forzar: forzar)) {
+          secciones = parcial;
+          notifyListeners();
+        }
+        return;
+      }
+      final fn = cargarSecciones!;
       if (fn is Future<List<YtSection>> Function({bool forzar})) {
         secciones = await fn(forzar: forzar);
       } else if (fn is Future<List<YtSection>> Function(bool forzar)) {

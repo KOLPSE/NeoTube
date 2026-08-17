@@ -143,6 +143,27 @@ class YtStreamResolver {
   /// El número de cliente de `ANDROID_VR` en la tabla interna de YouTube.
   static const _clientName = '28';
 
+  /// Las cabeceras con las que hay que **abrir** la URL resuelta, no solo
+  /// pedirla.
+  ///
+  /// Sin esto, libmpv abre la URL con el `User-Agent` genérico de ffmpeg, que
+  /// no es el mismo con el que `ANDROID_VR` la pidió — y es exactamente la
+  /// misma familia de fallo que el cliente `IOS` de más arriba: la URL se
+  /// descarga igual de bien por HTTP con cualquier cabecera, pero eso no dice
+  /// nada de si el reproductor de verdad la va a poder abrir.
+  ///
+  /// Se ve en Metrolist (github.com/MetrolistGroup/Metrolist, el mismo
+  /// problema resuelto en Android): manda el `User-Agent` del cliente que
+  /// pidió la URL —y `Referer`/`Origin` de `youtube.com`— en la petición real
+  /// de reproducción, no solo en la de `/player`. yt-dlp acaba pidiendo la
+  /// misma URL con el mismo cliente (ver arriba), así que las mismas
+  /// cabeceras valen tanto si la URL vino de aquí como del plan B.
+  static const cabecerasDeReproduccion = {
+    'User-Agent': _userAgent,
+    'Referer': 'https://www.youtube.com/',
+    'Origin': 'https://www.youtube.com',
+  };
+
   /// Estados de `playabilityStatus` que son culpa del vídeo, no del método.
   /// Con estos no se cae a yt-dlp: fallaría igual, tres segundos más tarde.
   ///

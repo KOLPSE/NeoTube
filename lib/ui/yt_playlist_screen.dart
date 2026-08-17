@@ -297,11 +297,11 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
                       onPressed: () {
-                        final mezcla = [...c.pistas]..shuffle();
-                        unawaited(widget.player.reproducirLista(
-                          mezcla,
-                          contexto: widget.item.playlistId ?? widget.item.browseId,
-                        ));
+                        // El aleatorio es un modo persistente (yt_player.dart),
+                        // no "barajar esta lista una vez": si no está encendido,
+                        // se enciende, y reproducirLista baraja el resto sola.
+                        if (!widget.player.aleatorio) widget.player.alternarAleatorio();
+                        unawaited(_reproducirDesde(0));
                       },
                       icon: const Icon(Icons.shuffle),
                       label: const Text('Aleatorio'),

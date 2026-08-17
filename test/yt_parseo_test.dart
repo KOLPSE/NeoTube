@@ -640,4 +640,260 @@ group('carátulas de un álbum', () {
       expect(c.pistas.single.miniatura, isNull);
     });
   });
+
+  group('búsqueda (search)', () {
+    Map<String, dynamic> searchTab(List<dynamic> contents) => {
+          'contents': {
+            'tabbedSearchResultsRenderer': {
+              'tabs': [
+                {
+                  'tabRenderer': {
+                    'content': {
+                      'sectionListRenderer': {'contents': contents},
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        };
+
+    Map<String, dynamic> itemCancion(String videoId, String titulo, String artista) => {
+          'musicResponsiveListItemRenderer': {
+            'flexColumns': [
+              {
+                'musicResponsiveListItemFlexColumnRenderer': {
+                  'text': {
+                    'runs': [
+                      {'text': titulo},
+                    ],
+                  },
+                },
+              },
+              {
+                'musicResponsiveListItemFlexColumnRenderer': {
+                  'text': {
+                    'runs': [
+                      {'text': artista},
+                    ],
+                  },
+                },
+              },
+            ],
+            'playlistItemData': {'videoId': videoId},
+          },
+        };
+
+    Map<String, dynamic> itemArtista(String browseId, String nombre) => {
+          'musicResponsiveListItemRenderer': {
+            'flexColumns': [
+              {
+                'musicResponsiveListItemFlexColumnRenderer': {
+                  'text': {
+                    'runs': [
+                      {'text': nombre},
+                    ],
+                  },
+                },
+              },
+              {
+                'musicResponsiveListItemFlexColumnRenderer': {
+                  'text': {
+                    'runs': [
+                      {'text': 'Artista'},
+                    ],
+                  },
+                },
+              },
+            ],
+            'navigationEndpoint': {
+              'browseEndpoint': {'browseId': browseId},
+            },
+          },
+        };
+
+    test('parsea tarjeta de resultado principal (musicCardShelfRenderer) con sus subitems', () {
+      final j = searchTab([
+        {
+          'musicCardShelfRenderer': {
+            'header': {
+              'musicCardShelfHeaderBasicRenderer': {
+                'title': {
+                  'runs': [
+                    {'text': 'Resultado principal'},
+                  ],
+                },
+              },
+            },
+            'title': {
+              'runs': [
+                {'text': 'Bad Bunny'},
+              ],
+            },
+            'subtitle': {
+              'runs': [
+                {'text': 'Artista • 80 M oyentes'},
+              ],
+            },
+            'onTap': {
+              'browseEndpoint': {'browseId': 'UC_badbunny_artist_id'},
+            },
+            'contents': [
+              itemCancion('v1111111111', 'Dakiti', 'Bad Bunny'),
+              itemCancion('v2222222222', 'Yonaguni', 'Bad Bunny'),
+            ],
+          },
+        },
+      ]);
+
+      final secciones = api.buscarDeRespuesta(j);
+      expect(secciones, hasLength(1));
+      expect(secciones.first.titulo, 'Resultado principal');
+      expect(secciones.first.items, hasLength(3)); // Tarjeta principal + 2 subcanciones
+      expect(secciones.first.items[0].titulo, 'Bad Bunny');
+      expect(secciones.first.items[0].tipo, YtTipo.artista);
+      expect(secciones.first.items[0].browseId, 'UC_badbunny_artist_id');
+      expect(secciones.first.items[1].titulo, 'Dakiti');
+      expect(secciones.first.items[1].tipo, YtTipo.cancion);
+      expect(secciones.first.items[1].videoId, 'v1111111111');
+    });
+
+    test('parsea búsquedas de ambiente/género sin shelves agrupando items sueltos de itemSectionRenderer', () {
+      // Caso "lofi chill music": no hay musicShelfRenderer sino múltiples itemSectionRenderers con un item cada uno
+      final j = searchTab([
+        {
+          'itemSectionRenderer': {
+            'contents': [
+              itemCancion('lofi1111111', 'Lofi Sleep', 'Lofi Girl'),
+            ],
+          },
+        },
+        {
+          'itemSectionRenderer': {
+            'contents': [
+              itemCancion('lofi2222222', 'Rainy Night Lofi', 'Chillhop'),
+            ],
+          },
+        },
+        {
+          'itemSectionRenderer': {
+            'contents': [
+              itemArtista('UC_lofitokyo', 'Lofi Tokyo'),
+            ],
+          },
+        },
+      ]);
+
+      final secciones = api.buscarDeRespuesta(j);
+      expect(secciones.isNotEmpty, isTrue);
+
+      final seccionCanciones = secciones.firstWhere((s) => s.titulo.contains('canciones'));
+      expect(seccionCanciones.items, hasLength(2));
+      expect(seccionCanciones.items[0].videoId, 'lofi1111111');
+      expect(seccionCanciones.items[1].videoId, 'lofi2222222');
+
+      final seccionArtistas = secciones.firstWhere((s) => s.titulo == 'Artistas');
+      expect(seccionArtistas.items, hasLength(1));
+      expect(seccionArtistas.items[0].browseId, 'UC_lofitokyo');
+    });
+
+    test('combina búsqueda general con búsqueda filtrada de canciones (jSongs) y deduplica', () {
+      final jGeneral = searchTab([
+        {
+          'musicCardShelfRenderer': {
+            'title': {
+              'runs': [
+                {'text': 'Bad Bunny'},
+              ],
+            },
+            'onTap': {
+              'browseEndpoint': {'browseId': 'UC_badbunny'},
+            },
+            'contents': [
+              itemCancion('song_top_1', 'Cancion Top 1', 'Bad Bunny'),
+            ],
+          },
+        },
+        {
+          'musicShelfRenderer': {
+            'title': {
+              'runs': [
+                {'text': 'Álbumes'},
+              ],
+            },
+            'contents': [
+              {
+                'musicTwoRowItemRenderer': {
+                  'title': {
+                    'runs': [
+                      {'text': 'Un Verano Sin Ti'},
+                    ],
+                  },
+                  'navigationEndpoint': {
+                    'browseEndpoint': {'browseId': 'MPREb_album_id'},
+                  },
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      final jSongs = searchTab([
+        {
+          'musicShelfRenderer': {
+            'title': {
+              'runs': [
+                {'text': 'Canciones'},
+              ],
+            },
+            'contents': [
+              itemCancion('song_top_1', 'Cancion Top 1', 'Bad Bunny'), // Repetida del card
+              itemCancion('song_2', 'Cancion 2', 'Bad Bunny'),
+              itemCancion('song_3', 'Cancion 3', 'Bad Bunny'),
+            ],
+          },
+        },
+      ]);
+
+      final secciones = api.buscarDeRespuesta(jGeneral, jSongs: jSongs);
+
+      expect(secciones, hasLength(3));
+      expect(secciones[0].titulo, 'Resultado principal');
+      expect(secciones[1].titulo, 'Canciones');
+      expect(secciones[2].titulo, 'Álbumes');
+
+      // Las canciones de jSongs deben incluirse sin duplicar
+      expect(secciones[1].items, hasLength(3));
+      expect(secciones[1].items.map((i) => i.videoId), ['song_top_1', 'song_2', 'song_3']);
+      expect(secciones[2].items[0].tipo, YtTipo.album);
+    });
+
+    test('extraerTokenContinuacionDeSearch extrae token de un musicShelfRenderer', () {
+      final j = searchTab([
+        {
+          'musicShelfRenderer': {
+            'title': {
+              'runs': [
+                {'text': 'Canciones'},
+              ],
+            },
+            'contents': [
+              itemCancion('s1', 'Titulo 1', 'Artista 1'),
+            ],
+            'continuations': [
+              {
+                'nextContinuationData': {
+                  'continuation': 'token_busqueda_continuation_123',
+                },
+              },
+            ],
+          },
+        },
+      ]);
+
+      final token = YtMusicApi.extraerTokenContinuacionDeSearch(j);
+      expect(token, 'token_busqueda_continuation_123');
+    });
+  });
 }

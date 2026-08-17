@@ -1,42 +1,49 @@
-## ⚠️ Sobre los cortes de reproducción — léelo antes de instalar
+## Reproducción: bastante más fiable
 
-**YouTube rechaza a veces la URL del stream que él mismo acaba de emitir.** Cuando pasa, esa
-canción tarda **~2,5 s en arrancar en vez de ~0,1 s**. Suena igual: NeoTube lo detecta y
-reintenta solo por otra vía.
+La causa de los cortes de reproducción de la 0.1.5 (la URL de audio se resolvía bien pero
+`libmpv` la abría sin las cabeceras con las que se pidió, y a veces se la rechazaba) ya se
+conoce. La URL se abre ahora con el mismo `User-Agent` y el mismo `Referer`/`Origin` con el
+que se resolvió.
 
-**Va a rachas, y las malas son bastante malas.** Medido durante el desarrollo: hay tramos de
-17 canciones seguidas sin un solo fallo, y tramos donde falla **una de cada dos**. No es un
-goteo constante; es a temporadas.
+Medido en una sesión larga de escucha, antes fallaba prácticamente toda canción y ahora
+cae, como mucho, una de cada quince o veinte — casi siempre solo la primera del arranque,
+antes de que la identidad de visitante haya "calentado". Sigue habiendo un plan B automático
+(yt-dlp) para cuando pase, así que una canción rara vez se queda sin sonar. No prometemos que
+esto quede cerrado del todo: es la API interna de YouTube, sin documentar, y puede volver a
+cambiar.
 
-No es un fallo de NeoTube ni de tu conexión: ocurre igual usando `yt-dlp` directamente, sin
-NeoTube de por medio. Pero **la causa exacta no está identificada**, así que tampoco vamos a
-jurar que sea solo cosa de YouTube.
+## Modo aleatorio
 
-Hay una mitigación puesta —renovar la identidad de visitante al detectar el problema y cada
-30 minutos— y hay que decir que **no funcionó**: medida contra el mismo escenario, la tasa de
-fallos no bajó. Se queda porque no hace daño, no porque lo arregle.
+Botón de aleatorio en la barra inferior, como el de Spotify: se queda encendido entre
+canciones y entre listas hasta que lo apagas, en vez de barajar una lista una sola vez. El
+botón "Aleatorio" de una lista enciende el mismo modo.
 
-Si te toca una racha mala, cerrar y abrir la app a veces la corta.
+## Buscador arreglado
 
----
+La búsqueda solo miraba la pestaña "Todo" de YouTube Music, que recorta cada categoría a un
+puñado de resultados de muestra — de ahí que "bad bunny" solo sacara 3 canciones y consultas
+de estado de ánimo como "lofi chill music" no sacaran nada. Ahora pide también la búsqueda
+filtrada por canciones y sigue su continuación, así que salen 40-60 canciones reales por
+consulta.
 
-## Reproducción: de ~2,7 s a ~0,12 s por canción
+## Controles de la barra de tareas de Windows
 
-Las canciones ya no pasan por un subproceso. La URL del audio se le pide directamente a la
-misma API interna con la que NeoTube habla para todo lo demás, en la misma aplicación.
+Al pasar el ratón por el icono de NeoTube en la barra de tareas aparece la miniatura con
+anterior, pausa/reproducir y siguiente — igual que cualquier reproductor nativo de Windows.
+De paso, el icono de la app (ventana, barra de tareas y el panel multimedia de Windows) ya es
+el logo real de NeoTube: antes era un marcador de posición de baja resolución y Windows no
+sabía identificar la app en el Centro de conexiones rápidas.
 
-- **~120 ms de mediana** contra los ~2700 ms de antes: el silencio entre pistas desaparece.
-- Deja de hacer falta un runtime de JavaScript al lado, que era otra fuente de fallos.
-- `yt-dlp` sigue incluido como plan B y entra solo cuando la vía rápida no puede.
+## Biblioteca más rápida
 
-## Discord Rich Presence
+"Biblioteca" esperaba a que terminasen sus cuatro peticiones (playlists, álbumes, canciones
+favoritas, artistas) antes de pintar nada. Con una lista de favoritas grande, su paginación
+—que es forzosamente secuencial— bloqueaba de gratis a las otras tres, que suelen ir mucho
+más rápido. Ahora cada categoría se pinta en cuanto llega la suya.
 
-Nuevo, y **apagado por defecto**: se enciende en Ajustes. Muestra qué estás escuchando, la
-carátula, la barra de progreso, cuál es la siguiente y un botón a GitHub.
+## Modo rendimiento, arreglado de verdad
 
-## Arreglos
-
-- Las canciones dentro de un **álbum** ya salen con su carátula. Las filas de un álbum no la
-  traen (enseñan el número de pista), así que ahora heredan la portada del álbum.
-- La barra de progreso de Discord aparece siempre, también en canciones abiertas desde la
-  portada o desde el buscador.
+Encender el modo rendimiento quitaba las carátulas pero no liberaba la RAM que ya tenía
+reservada: vaciaba la caché de imágenes de Flutter, pero nunca le pedía a Windows que le
+devolviera esas páginas al sistema (`EmptyWorkingSet`). Ahora sí lo hace, igual que al
+esconderse en la bandeja.

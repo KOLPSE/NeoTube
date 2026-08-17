@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
@@ -18,9 +19,15 @@ class YtApiException implements Exception {
 
 const int _umbralIsolate = 192 * 1024;
 
-List<YtSection> _decodeAndParseBuscar(Uint8List bytes) {
-  final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytes);
-  return YtMusicApi._buscarDeRespuestaStatic(j);
+List<YtSection> _decodeAndParseBuscar(Uint8List bytesGeneral, [Uint8List? bytesSongs]) {
+  final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytesGeneral);
+  dynamic jSongs;
+  if (bytesSongs != null && bytesSongs.isNotEmpty) {
+    try {
+      jSongs = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytesSongs);
+    } catch (_) {}
+  }
+  return YtMusicApi._buscarDeRespuestaStatic(j, jSongs: jSongs);
 }
 
 (List<YtSection>, String?) _decodeAndParseSeccionesConToken(Uint8List bytes) {
@@ -182,20 +189,52 @@ class YtMusicApi {
 
   // ------------------------------------------------------------------ búsqueda
 
+  static const _paramsCanciones = 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D';
+
   /// Busca y devuelve los resultados **por categorías** (canciones, listas,
-  /// álbumes, artistas), no una lista plana de canciones.
+  /// álbumes, artistas), combinando la búsqueda filtrada por canciones con la
+  /// vista general por categorías para ofrecer un listado amplio de canciones.
   Future<List<YtSection>> buscar(String query, {bool forzar = false}) async {
-    final clave = 'buscar:${query.trim().toLowerCase()}';
+    final queryLimpia = query.trim();
+    if (queryLimpia.isEmpty) return const [];
+    final clave = 'buscar:${queryLimpia.toLowerCase()}';
     if (!forzar) {
       final cached = cache.get<List<YtSection>>(clave);
       if (cached != null) return cached;
     }
-    final bytes = await _postBytes('search', {'query': query});
-    final secciones = bytes.length >= _umbralIsolate
-        ? await Isolate.run(() => _decodeAndParseBuscar(bytes))
-        : _decodeAndParseBuscar(bytes);
+
+    final respuestas = await Future.wait([
+      _postBytes('search', {'query': queryLimpia}),
+      _buscarCancionesBytes(queryLimpia).catchError((_) => Uint8List(0)),
+    ]);
+
+    final bytesGeneral = respuestas[0];
+    final bytesSongs = respuestas[1];
+
+    final secciones = (bytesGeneral.length + bytesSongs.length) >= _umbralIsolate
+        ? await Isolate.run(() => _decodeAndParseBuscar(bytesGeneral, bytesSongs))
+        : _decodeAndParseBuscar(bytesGeneral, bytesSongs);
+
     if (secciones.isNotEmpty) cache.set(clave, secciones);
     return secciones;
+  }
+
+  Future<Uint8List> _buscarCancionesBytes(String query) async {
+    final bytes = await _postBytes('search', {
+      'query': query,
+      'params': _paramsCanciones,
+    });
+    try {
+      final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytes);
+      final token = _extraerTokenContinuacionDeSearch(j);
+      if (token != null) {
+        final contBytes = await _postBytes('search', {'continuation': token});
+        final dynamic jCont = const Utf8Decoder().fuse(const JsonDecoder()).convert(contBytes);
+        final fusionado = _fusionarContinuacionDeSearch(j, jCont);
+        return Uint8List.fromList(utf8.encode(jsonEncode(fusionado)));
+      }
+    } catch (_) {}
+    return bytes;
   }
 
   // ------------------------------------------------------- portada / explorar
@@ -243,9 +282,6 @@ class YtMusicApi {
     return secciones;
   }
 
-  /// El parseo de una respuesta de `browse` ya descodificada, separado del
-  /// viaje de red para poder probarlo: es la parte que se rompe cuando Google
-  /// cambia la forma del JSON, y la única que se puede comprobar sin cuenta.
   @visibleForTesting
   List<YtSection> seccionesDeRespuesta(dynamic j) => _seccionesDeRespuestaStatic(j);
 
@@ -256,6 +292,14 @@ class YtMusicApi {
   @visibleForTesting
   static (List<YtSection>, String?) seccionesContinuationDeRespuesta(dynamic j) =>
       _seccionesContinuationDeRespuestaStatic(j);
+
+  @visibleForTesting
+  List<YtSection> buscarDeRespuesta(dynamic j, {dynamic jSongs}) =>
+      _buscarDeRespuestaStatic(j, jSongs: jSongs);
+
+  @visibleForTesting
+  static String? extraerTokenContinuacionDeSearch(dynamic j) =>
+      _extraerTokenContinuacionDeSearch(j);
 
   static List<YtSection> _seccionesDeRespuestaStatic(dynamic j) {
     final secciones = <YtSection>[];
@@ -374,15 +418,208 @@ class YtMusicApi {
     return null;
   }
 
-  static List<YtSection> _buscarDeRespuestaStatic(dynamic j) {
-    final secciones = <YtSection>[];
+  static String? _extraerTokenContinuacionDeSearch(dynamic j) {
+    if (j is! Map) return null;
     try {
-      final tabs = j['contents']['tabbedSearchResultsRenderer']['tabs'] as List;
-      final contenido =
-          tabs.first['tabRenderer']['content']['sectionListRenderer']['contents'] as List;
-      for (final bloque in contenido) {
-        final s = _parseSeccion(bloque);
-        if (s != null && s.items.isNotEmpty) secciones.add(s);
+      final tabs = (j['contents']?['tabbedSearchResultsRenderer']?['tabs'] ??
+          j['contents']?['singleColumnBrowseResultsRenderer']?['tabs']) as List?;
+      if (tabs == null || tabs.isEmpty) return null;
+      final slr = tabs.first['tabRenderer']?['content']?['sectionListRenderer'] as Map?;
+      if (slr == null) return null;
+      final contents = slr['contents'] as List? ?? const [];
+      for (final b in contents) {
+        if (b is! Map) continue;
+        final shelf = b['musicShelfRenderer'] as Map?;
+        if (shelf != null) {
+          final t = _tokenDeContinuacion(shelf, (shelf['contents'] as List?) ?? const []);
+          if (t != null) return t;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static dynamic _fusionarContinuacionDeSearch(dynamic j, dynamic jCont) {
+    try {
+      if (j is! Map || jCont is! Map) return j;
+      List? masItems;
+      final msc = jCont['continuationContents']?['musicShelfContinuation'] as Map?;
+      if (msc != null && msc['contents'] is List) {
+        masItems = msc['contents'] as List;
+      }
+      if (masItems == null) {
+        final acciones = jCont['onResponseReceivedActions'] as List?;
+        if (acciones != null && acciones.isNotEmpty) {
+          masItems = acciones.first['appendContinuationItemsAction']?['continuationItems'] as List?;
+        }
+      }
+      if (masItems != null && masItems.isNotEmpty) {
+        final tabs = (j['contents']?['tabbedSearchResultsRenderer']?['tabs'] ??
+            j['contents']?['singleColumnBrowseResultsRenderer']?['tabs']) as List?;
+        final slr = tabs?.first['tabRenderer']?['content']?['sectionListRenderer'] as Map?;
+        final contents = slr?['contents'] as List?;
+        if (contents != null) {
+          for (final b in contents) {
+            if (b is Map && b.containsKey('musicShelfRenderer')) {
+              final shelf = b['musicShelfRenderer'] as Map;
+              final list = shelf['contents'] as List?;
+              if (list != null) {
+                list.addAll(masItems);
+                break;
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return j;
+  }
+
+  static List<YtSection> _buscarDeRespuestaStatic(dynamic j, {dynamic jSongs}) {
+    final secciones = <YtSection>[];
+    if (j is! Map && jSongs is! Map) return secciones;
+
+    try {
+      final idsVistos = <String>{};
+
+      // 1. Parsear canciones de la búsqueda filtrada por canciones (si está disponible)
+      List<YtItem> cancionesFiltradas = const [];
+      if (jSongs is Map) {
+        cancionesFiltradas = _extraerCancionesDeSearch(jSongs);
+      }
+
+      // 2. Parsear la respuesta general (Todo)
+      final seccionesGeneral = <YtSection>[];
+      if (j is Map) {
+        final tabs = (j['contents']?['tabbedSearchResultsRenderer']?['tabs'] ??
+            j['contents']?['singleColumnBrowseResultsRenderer']?['tabs']) as List? ??
+            const [];
+        final contenido = tabs.isNotEmpty
+            ? (tabs.first['tabRenderer']?['content']?['sectionListRenderer']?['contents'] as List? ?? const [])
+            : const [];
+
+        final itemsSueltos = <YtItem>[];
+
+        for (final bloque in contenido) {
+          if (bloque is! Map) continue;
+          final clave = bloque.keys.first;
+          final valor = bloque[clave] as Map?;
+          if (valor == null) continue;
+
+          if (clave == 'musicCardShelfRenderer') {
+            final card = _parseCardShelf(valor);
+            if (card != null && card.items.isNotEmpty) {
+              seccionesGeneral.add(card);
+            }
+          } else if (clave == 'musicShelfRenderer' ||
+              clave == 'musicCarouselShelfRenderer' ||
+              clave == 'gridRenderer') {
+            final s = _parseSeccion(bloque);
+            if (s != null && s.items.isNotEmpty) {
+              seccionesGeneral.add(s);
+            }
+          } else if (clave == 'itemSectionRenderer') {
+            final dentro = valor['contents'] as List? ?? const [];
+            for (final it in dentro) {
+              if (it is! Map) continue;
+              final k = it.keys.first;
+              if (k == 'musicShelfRenderer' ||
+                  k == 'musicCarouselShelfRenderer' ||
+                  k == 'gridRenderer' ||
+                  k == 'musicCardShelfRenderer') {
+                final s = _parseSeccion(it);
+                if (s != null && s.items.isNotEmpty) seccionesGeneral.add(s);
+              } else {
+                final item = _parseItem(it);
+                if (item != null && item.tieneDestino) itemsSueltos.add(item);
+              }
+            }
+          }
+        }
+
+        // Si la respuesta venía con items sueltos en itemSectionRenderer (caso "lofi chill music"),
+        // los agrupamos en secciones coherentes por tipo.
+        if (itemsSueltos.isNotEmpty) {
+          final porTipo = <YtTipo, List<YtItem>>{};
+          for (final it in itemsSueltos) {
+            porTipo.putIfAbsent(it.tipo, () => []).add(it);
+          }
+          for (final entry in porTipo.entries) {
+            final titulo = switch (entry.key) {
+              YtTipo.cancion => 'Otras canciones y vídeos',
+              YtTipo.lista => 'Listas de reproducción',
+              YtTipo.album => 'Álbumes',
+              YtTipo.artista => 'Artistas',
+              _ => 'Otros resultados',
+            };
+            seccionesGeneral.add(YtSection(titulo: titulo, items: entry.value));
+          }
+        }
+      }
+
+      // 3. Organizar y combinar secciones
+      // Separamos "Resultado principal" para ponerlo primero
+      final resultadoPrincipal = seccionesGeneral
+          .where((s) =>
+              s.titulo.toLowerCase().contains('principal') ||
+              s.titulo.toLowerCase().contains('top'))
+          .toList();
+      final otrasSecciones = seccionesGeneral
+          .where((s) => !resultadoPrincipal.contains(s))
+          .toList();
+
+      for (final rp in resultadoPrincipal) {
+        if (rp.items.isNotEmpty) {
+          secciones.add(rp);
+          for (final it in rp.items) {
+            if (it.browseId != null) idsVistos.add(it.browseId!);
+          }
+        }
+      }
+
+      // Añadimos sección de "Canciones"
+      if (cancionesFiltradas.isNotEmpty) {
+        final cancionesUnicas = <YtItem>[];
+        for (final s in cancionesFiltradas) {
+          final id = s.videoId;
+          if (id != null) {
+            if (!idsVistos.contains(id)) {
+              idsVistos.add(id);
+              cancionesUnicas.add(s);
+            }
+          } else {
+            cancionesUnicas.add(s);
+          }
+        }
+        if (cancionesUnicas.isNotEmpty) {
+          secciones.add(YtSection(titulo: 'Canciones', items: cancionesUnicas));
+        }
+      }
+
+      // Añadimos las demás secciones (Álbumes, Artistas, Listas, etc.), deduplicando
+      for (final s in otrasSecciones) {
+        final esSeccionCanciones =
+            s.titulo.toLowerCase() == 'canciones' || s.titulo.toLowerCase() == 'songs';
+        if (cancionesFiltradas.isNotEmpty && esSeccionCanciones) {
+          continue;
+        }
+
+        final itemsFiltrados = <YtItem>[];
+        for (final it in s.items) {
+          final id = it.videoId ?? it.browseId ?? it.playlistId;
+          if (id != null) {
+            if (!idsVistos.contains(id)) {
+              idsVistos.add(id);
+              itemsFiltrados.add(it);
+            }
+          } else {
+            itemsFiltrados.add(it);
+          }
+        }
+        if (itemsFiltrados.isNotEmpty) {
+          final titulo = esSeccionCanciones ? 'Canciones' : s.titulo;
+          secciones.add(YtSection(titulo: titulo, items: itemsFiltrados));
+        }
       }
     } catch (e) {
       debugPrint('[NeoTube buscar] no se pudo parsear: $e');
@@ -390,45 +627,146 @@ class YtMusicApi {
     return secciones;
   }
 
+  static List<YtItem> _extraerCancionesDeSearch(dynamic j) {
+    final items = <YtItem>[];
+    try {
+      if (j is! Map) return items;
+      final tabs = (j['contents']?['tabbedSearchResultsRenderer']?['tabs'] ??
+          j['contents']?['singleColumnBrowseResultsRenderer']?['tabs']) as List? ??
+          const [];
+      if (tabs.isEmpty) return items;
+      final slr = tabs.first['tabRenderer']?['content']?['sectionListRenderer'] as Map?;
+      final contents = slr?['contents'] as List? ?? const [];
+      for (final b in contents) {
+        if (b is! Map) continue;
+        final shelf = b['musicShelfRenderer'] as Map?;
+        if (shelf != null) {
+          final list = shelf['contents'] as List? ?? const [];
+          for (final it in list) {
+            final parsed = _parseItem(it);
+            if (parsed != null && parsed.tieneDestino) items.add(parsed);
+          }
+        }
+      }
+    } catch (_) {}
+    return items;
+  }
+
+  static YtSection? _parseCardShelf(Map valor) {
+    try {
+      final headerTitle = _runsToText(
+              valor['header']?['musicCardShelfHeaderBasicRenderer']?['title']?['runs']) ??
+          'Resultado principal';
+      final items = <YtItem>[];
+
+      // 1. Tarjeta principal
+      final cardTitle = _runsToText(valor['title']?['runs']) ?? '';
+      if (cardTitle.isNotEmpty) {
+        final cardSubtitle = _runsCompletos(valor['subtitle']?['runs']);
+        final nav = valor['onTap'] ?? valor['title']?['runs']?[0]?['navigationEndpoint'];
+        final videoId = nav?['watchEndpoint']?['videoId'] as String? ??
+            valor['thumbnailOverlay']?['musicItemThumbnailOverlayRenderer']?['content']
+                ?['musicPlayButtonRenderer']?['playNavigationEndpoint']?['watchEndpoint']
+                ?['videoId'] as String?;
+        final playlistId = (nav?['watchPlaylistEndpoint']?['playlistId'] ??
+                _playlistDelOverlay(valor)) as String?;
+        final browseId = nav?['browseEndpoint']?['browseId'] as String?;
+        final miniatura = _urlDeMiniatura(valor['thumbnailRenderer']) ??
+            _urlDeMiniatura(valor['thumbnail']);
+
+        final itemPrincipal = YtItem(
+          tipo: _tipoDe(videoId: videoId, playlistId: playlistId, browseId: browseId),
+          titulo: cardTitle,
+          subtitulo: cardSubtitle,
+          videoId: videoId,
+          browseId: browseId,
+          playlistId: playlistId ??
+              (browseId != null && browseId.startsWith('VL') ? browseId.substring(2) : null),
+          miniatura: miniatura,
+        );
+        if (itemPrincipal.tieneDestino) items.add(itemPrincipal);
+      }
+
+      // 2. Canciones / subitems incrustados en la tarjeta
+      final subContents = valor['contents'] as List? ?? const [];
+      for (final sub in subContents) {
+        final p = _parseItem(sub);
+        if (p != null && p.tieneDestino) items.add(p);
+      }
+
+      return items.isEmpty ? null : YtSection(titulo: headerTitle, items: items);
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Las pestañas de biblioteca de golpe, cada una como una sección con su
   /// título. Se piden en paralelo porque son cuatro viajes independientes y en
   /// serie se notaba la espera; una que falle no se lleva por delante a las
   /// otras tres.
-  Future<List<YtSection>> biblioteca({bool forzar = false}) async {
+  /// Las pestañas de biblioteca de golpe, cada una como una sección con su
+  /// título, entregadas conforme llega cada una de las cuatro peticiones en
+  /// vez de esperar a que acaben las cuatro: con una biblioteca de canciones
+  /// favoritas grande, esa era la única que se notaba —su paginación es
+  /// secuencial, página a página— y tenía bloqueada de gratis a playlists,
+  /// álbumes y artistas, que suelen acabar mucho antes. Se piden en paralelo
+  /// por lo mismo que antes: una que falle no se lleva por delante a las
+  /// otras tres.
+  Stream<List<YtSection>> bibliotecaProgresiva({bool forzar = false}) {
     const clave = 'biblioteca';
     if (!forzar) {
       final cached = cache.get<List<YtSection>>(clave);
-      if (cached != null) return cached;
+      if (cached != null) return Stream.value(cached);
     }
+
     final peticiones = <String, String>{
       browseIdListas: 'Tus playlists',
       browseIdAlbumes: 'Tus álbumes',
       browseIdCanciones: 'Canciones que te gustan',
       browseIdArtistas: 'Tus artistas',
     };
-    final resultados = await Future.wait(
-      peticiones.keys.map((id) async {
-        try {
-          return await browseSections(id, forzar: forzar);
-        } catch (e) {
-          debugPrint('[NeoTube biblioteca $id] fallo: $e');
-          return <YtSection>[];
+    final claves = peticiones.keys.toList();
+    final resultados = List<List<YtSection>?>.filled(claves.length, null);
+
+    List<YtSection> combinar() {
+      final secciones = <YtSection>[];
+      for (var i = 0; i < claves.length; i++) {
+        final parcial = resultados[i];
+        if (parcial == null) continue;
+        final titulo = peticiones[claves[i]]!;
+        for (final s in parcial) {
+          // La respuesta de biblioteca casi nunca trae título de sección
+          // propio (es una rejilla pelada), así que se pone el de la
+          // pestaña; si trae uno de verdad, manda el suyo.
+          secciones.add(s.titulo.isEmpty ? YtSection(titulo: titulo, items: s.items) : s);
         }
-      }),
-    );
-    final secciones = <YtSection>[];
-    var i = 0;
-    for (final titulo in peticiones.values) {
-      for (final s in resultados[i]) {
-        // La respuesta de biblioteca casi nunca trae título de sección propio
-        // (es una rejilla pelada), así que se pone el de la pestaña; si trae
-        // uno de verdad, manda el suyo.
-        secciones.add(s.titulo.isEmpty ? YtSection(titulo: titulo, items: s.items) : s);
       }
-      i++;
+      return secciones;
     }
-    if (secciones.isNotEmpty) cache.set(clave, secciones);
-    return secciones;
+
+    final controlador = StreamController<List<YtSection>>();
+    var restantes = claves.length;
+
+    for (var i = 0; i < claves.length; i++) {
+      final indice = i;
+      browseSections(claves[indice], forzar: forzar).then((r) {
+        resultados[indice] = r;
+      }, onError: (Object e) {
+        debugPrint('[NeoTube biblioteca ${claves[indice]}] fallo: $e');
+        resultados[indice] = const <YtSection>[];
+      }).whenComplete(() {
+        restantes--;
+        if (controlador.isClosed) return;
+        final secciones = combinar();
+        controlador.add(secciones);
+        if (restantes == 0) {
+          if (secciones.isNotEmpty) cache.set(clave, secciones);
+          unawaited(controlador.close());
+        }
+      });
+    }
+
+    return controlador.stream;
   }
 
   // ------------------------------------------------------ listas y álbumes
@@ -902,9 +1240,26 @@ class YtMusicApi {
 
       final videoId = _extraerVideoId(item);
       final nav = item['navigationEndpoint'];
-      final browseId = nav?['browseEndpoint']?['browseId'] as String?;
+      var browseId = nav?['browseEndpoint']?['browseId'] as String?;
       final playlistId = (nav?['watchPlaylistEndpoint']?['playlistId'] ??
           _playlistDelOverlay(item)) as String?;
+
+      if (browseId == null && videoId == null && playlistId == null) {
+        final runs0 = columnas[0]['musicResponsiveListItemFlexColumnRenderer']['text']?['runs'] as List?;
+        browseId = runs0?[0]?['navigationEndpoint']?['browseEndpoint']?['browseId'] as String?;
+        if (browseId == null && columnas.length > 1) {
+          final runs1 = columnas[1]['musicResponsiveListItemFlexColumnRenderer']['text']?['runs'] as List?;
+          for (final r in runs1 ?? const []) {
+            if (r is Map) {
+              final b = r['navigationEndpoint']?['browseEndpoint']?['browseId'] as String?;
+              if (b != null) {
+                browseId = b;
+                break;
+              }
+            }
+          }
+        }
+      }
 
       return YtItem(
         tipo: _tipoDe(videoId: videoId, playlistId: playlistId, browseId: browseId),
@@ -943,8 +1298,13 @@ class YtMusicApi {
   static YtTipo _tipoDe({String? videoId, String? playlistId, String? browseId}) {
     if (videoId != null) return YtTipo.cancion;
     if (browseId != null && browseId.startsWith('MPRE')) return YtTipo.album;
-    if (browseId != null && browseId.startsWith('UC')) return YtTipo.artista;
-    if (playlistId != null || (browseId != null && browseId.startsWith('VL'))) {
+    if (browseId != null &&
+        (browseId.startsWith('UC') ||
+            browseId.startsWith('FEmusic_library_privately_owned_artist'))) {
+      return YtTipo.artista;
+    }
+    if (playlistId != null ||
+        (browseId != null && (browseId.startsWith('VL') || browseId.startsWith('RD')))) {
       return YtTipo.lista;
     }
     return YtTipo.desconocido;
@@ -962,6 +1322,11 @@ class YtMusicApi {
     } catch (_) {}
     try {
       return item['navigationEndpoint']['watchEndpoint']['videoId'] as String?;
+    } catch (_) {}
+    try {
+      final runs = item['flexColumns']?[0]?['musicResponsiveListItemFlexColumnRenderer']?['text']?['runs'] as List?;
+      final v = runs?[0]?['navigationEndpoint']?['watchEndpoint']?['videoId'] as String?;
+      if (v != null) return v;
     } catch (_) {}
     return null;
   }
