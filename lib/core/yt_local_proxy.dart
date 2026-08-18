@@ -4,35 +4,52 @@ import 'dart:io';
 import 'yt_stream.dart';
 
 /// Retransmite en `127.0.0.1` las URLs de audio que resuelve [YtStreamResolver],
-/// para que libmpv no las pida de un tirón.
+/// para que libmpv no las pida de un tirón — y avisa cuando choca con un
+/// corte que no puede sortear solo.
 ///
 /// ## Por qué existe esto
 ///
 /// La URL que devuelve la API es válida —lo prueba `tool/probe_stream.dart`—,
-/// pero **googlevideo contesta `403 Forbidden` en cuanto el trozo pedido pasa
-/// de un tamaño**. Se aisló con `tool/probe_headers.dart`, quitando variables
-/// una a una: no son las cabeceras (todas las combinaciones probadas pasan),
-/// no es la sesión, no es la identidad — es el tamaño del `Range` pedido. La
-/// frontera está justo en 1.000.000 de bytes: `bytes=0-900000` sirve 206 y
-/// `bytes=0-1000000` sirve 403, con la misma URL, la misma sesión, en la misma
-/// prueba. Y libmpv, al abrir un stream, pide `Range: bytes=0-` sin más —todo
-/// el fichero de un golpe—, así que **siempre** cae del lado malo del corte.
+/// pero **googlevideo contesta `403 Forbidden` en cuanto la posición pedida
+/// pasa de un byte concreto del fichero**. Se aisló con pruebas directas,
+/// quitando variables una a una: no son las cabeceras, no es la sesión, no es
+/// la reutilización de la conexión, no es si la URL es nueva o gastada — es
+/// la posición. Con el cliente `ANDROID_VR` el corte está justo en 1.000.000
+/// de bytes, **incluso pidiéndolo con una URL recién resuelta y nunca usada**:
+/// no es un cupo que se gasta, es que esa posición del fichero no se sirve
+/// por ese camino, punto. Con libmpv pidiendo `Range: bytes=0-` al abrir —el
+/// fichero entero de un golpe—, toda pista de más de un minuto caía del lado
+/// malo del corte.
 ///
-/// yt-dlp no lo sufre porque trocea sus descargas por su cuenta
-/// (`--http-chunk-size`, activo por defecto en las URLs de este tipo de
-/// cliente); aquí no hay yt-dlp de por medio en la vía rápida, así que hay que
-/// trocear a mano. Es la misma idea que un reproductor adaptativo de verdad:
-/// pedir el audio en tajadas, no entero.
+/// yt-dlp, con el mismo cliente, tropieza exactamente igual (se comprobó a
+/// pelo, sin nada de este código de por medio). Es un límite nuevo de
+/// googlevideo, no un bug de aquí — encaja con lo que yt-dlp llama SABR: un
+/// protocolo de streaming por el que Google está sustituyendo la descarga
+/// progresiva por rangos.
 ///
-/// ## Por qué no `package:http`
+/// ## ⚠️ Por qué esto no intenta seguir sirviendo desde otra URL
 ///
-/// `http.Client.get()` carga la respuesta entera en memoria antes de
-/// devolverla. `dart:io HttpClient` entrega cada trozo según llega, que es lo
-/// que hace falta para ir encadenando peticiones sin acumular el audio
-/// completo en RAM.
+/// La primera versión, al chocar con el corte, empalmaba en la misma
+/// respuesta HTTP los bytes que le faltaban desde una descarga de repuesto
+/// (`WEB_EMBEDDED_PLAYER`, el único cliente que sirve el fichero entero).
+/// **No funciona**: aunque el tamaño total coincida byte a byte, son dos
+/// descargas independientes del mismo audio, y un contenedor como WebM no es
+/// una tira plana de bytes — está organizado en clusters que tienen que
+/// empezar donde el códec los puso, no donde a este proxy le tocara cortar
+/// (900 000, un número elegido aquí sin relación con esa estructura). El
+/// resultado es un fichero con el tamaño correcto y la mitad de atrás
+/// corrupta: mpv no da error, simplemente dejaba de encontrar datos válidos y
+/// dab a la pista por terminada — el mismo síntoma que el bug original, solo
+/// que unos segundos más tarde.
+///
+/// La solución de verdad no es empalmar bytes: es que quien abre el medio
+/// (`YtPlayer`) **reabra en un fichero aparte y salte** a la posición donde
+/// iba, en vez de seguir la misma conexión. Este proxy solo avisa con
+/// [onCorte] de que ha chocado; no intenta arreglarlo él mismo.
 class YtLocalProxy {
   final HttpClient _cliente = HttpClient();
   final Map<String, String> _urls = {};
+  final Map<String, void Function()> _onCorte = {};
   HttpServer? _server;
   int _siguiente = 0;
 
@@ -49,13 +66,18 @@ class YtLocalProxy {
     return servidor.port;
   }
 
-  /// Da de alta [urlReal] y devuelve la URL local que hay que abrir en su
+  /// Da de alta [urlRapida] y devuelve la URL local que hay que abrir en su
   /// lugar. Cada llamada crea una entrada nueva: no hace falta limpiarlas
   /// (son un puñado de cadenas por pista, y la app no dura semanas abierta).
-  Future<Uri> exponer(String urlReal) async {
+  ///
+  /// [onCorte], si se pasa, se llama la primera vez que un trozo posterior al
+  /// primero falla: es la señal de que esta URL ya no va a dar más, y de que
+  /// hace falta la descarga de repuesto que gestiona `YtPlayer`.
+  Future<Uri> exponer(String urlRapida, {void Function()? onCorte}) async {
     final puerto = await _puerto();
     final token = (_siguiente++).toString();
-    _urls[token] = urlReal;
+    _urls[token] = urlRapida;
+    if (onCorte != null) _onCorte[token] = onCorte;
     return Uri(scheme: 'http', host: '127.0.0.1', port: puerto, path: '/s/$token');
   }
 
@@ -88,22 +110,25 @@ class YtLocalProxy {
       var pos = inicio;
       var trozo = await _pedirTrozo(real, pos, pos + _tamanoTrozo - 1);
       if (trozo.statusCode >= 400) {
+        // La propia vía rápida no arrancó (URL mala, vídeo bloqueado…): esto
+        // no es el corte de después, es la petición inicial fallando. Se
+        // devuelve el código real para que el mecanismo de reintento de
+        // `YtPlayer` (el que ve `mpv.stream.error`) siga funcionando igual.
         req.response.statusCode = trozo.statusCode;
         await req.response.close();
         return;
       }
 
-      final total = _totalDesde(trozo);
       req.response.statusCode = rangeHeader != null ? HttpStatus.partialContent : HttpStatus.ok;
-      if (total != null) {
-        if (rangeHeader != null) {
-          req.response.headers.set('content-range', 'bytes $inicio-${total - 1}/$total');
-        }
-        req.response.headers.set(HttpHeaders.contentLengthHeader, (total - inicio).toString());
-      }
       req.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+      // Sin `Content-Length` a propósito: no se sabe si va a hacer falta
+      // cortar antes de tiempo, y declarar uno que luego no se cumple es
+      // justo el fallo que costó una tarde entera. Sin él, dart:io manda la
+      // respuesta troceada (`Transfer-Encoding: chunked`) y cerrarla pronto
+      // es una respuesta corta y válida, no una rota.
       final tipo = trozo.headers.contentType;
       if (tipo != null) req.response.headers.contentType = tipo;
+      var total = _totalDesde(trozo);
 
       while (true) {
         await for (final datos in trozo) {
@@ -112,9 +137,12 @@ class YtLocalProxy {
         }
         if (total != null && pos >= total) break;
         trozo = await _pedirTrozo(real, pos, pos + _tamanoTrozo - 1);
-        // Un 403/416 aquí es fin de fichero o que la URL caducó a media
-        // descarga: se corta limpio en vez de reventar la respuesta.
-        if (trozo.statusCode >= 400) break;
+        if (trozo.statusCode >= 400) {
+          // La vía rápida chocó con el corte de posición: se corta aquí, en
+          // limpio, y se avisa para que `YtPlayer` reabra por la otra vía.
+          _onCorte[token]?.call();
+          break;
+        }
       }
       await req.response.close();
     } catch (_) {

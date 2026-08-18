@@ -69,7 +69,13 @@ class YtPlayer extends ChangeNotifier {
     // primera nota.
     unawaited(mpv.setVolume(_volumen.value.toDouble()));
     _subCompletado = mpv.stream.completed.listen((terminada) {
-      if (terminada && !_cambiando && cola.isNotEmpty) unawaited(siguiente(automatico: true));
+      if (!terminada || _cambiando) return;
+      final pista = actual;
+      if (pista != null && _pistaConCorte == pista.videoId) {
+        unawaited(_continuarTrasCorte(pista));
+        return;
+      }
+      if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
     });
     // La duración no se sabe hasta que libmpv ha abierto el medio, unos cientos
     // de milisegundos después de que la pista ya conste como "la actual". Sin
@@ -246,6 +252,18 @@ class YtPlayer extends ChangeNotifier {
   final Map<String, ({String url, DateTime hasta})> _urls = {};
   final Map<String, Future<String>> _enVuelo = {};
   static const _vidaDeUrl = Duration(minutes: 45);
+
+  /// La descarga completa (ver [_descargarCompletaConYtDlp]) de cada pista
+  /// que se ha abierto, por si hace falta cuando la vía rápida choque con el
+  /// corte de posición. Vive mientras viva `YtPlayer`: son Futures, no
+  /// cuestan nada hasta que alguien las espera.
+  final Map<String, Future<File?>> _continuaciones = {};
+
+  /// El videoId de la pista que acaba de chocar con el corte de la vía
+  /// rápida (ver `yt_local_proxy.dart`). Lo pone [YtLocalProxy.onCorte] y lo
+  /// consume el listener de `mpv.stream.completed`: si coincide con la pista
+  /// actual, ese "completado" no es el final de verdad, es el corte.
+  String? _pistaConCorte;
 
   // ------------------------------------------------------------------ yt-dlp
 
@@ -446,6 +464,87 @@ class YtPlayer extends ChangeNotifier {
     return url;
   }
 
+  /// Descarga **la pista entera** a un fichero, para cuando la vía rápida
+  /// (`ANDROID_VR`) se quede corta pasado el primer megabyte — ver
+  /// `yt_local_proxy.dart` para el porqué del corte, y [_continuarTrasCorte]
+  /// para qué se hace con este fichero. Se lanza en paralelo con la
+  /// reproducción, no antes: se llama sin esperar el resultado.
+  ///
+  /// `WEB_EMBEDDED_PLAYER` es el único cliente probado que no se corta ahí,
+  /// pero **no vale con resolver su URL y pedirla desde aquí**: esa URL solo
+  /// la sirve un cliente con la huella TLS de un navegador de verdad
+  /// (`curl_cffi`, que usa yt-dlp por debajo), y `dart:io HttpClient` no la
+  /// replica — da `403` aunque las cabeceras coincidan al carácter. Por eso
+  /// tiene que ser yt-dlp quien la baje de verdad, no solo quien la resuelva.
+  ///
+  /// Devuelve `null` en vez de lanzar: quien llama ya está sonando por la vía
+  /// rápida, y esto es un complemento, no algo de lo que dependa arrancar.
+  Future<File?> _descargarCompletaConYtDlp(String videoId) async {
+    final bin = findYtDlpBinary();
+    if (bin == null) return null;
+    final deno = findDenoBinary();
+    final destino = File(p.join((await _dirDeContinuaciones()).path, '$videoId.audio'));
+    final args = <String>[
+      if (deno != null) ...['--js-runtimes', 'deno:${deno.path}'],
+      '-f',
+      'bestaudio',
+      '--extractor-args',
+      'youtube:player_client=web_embedded',
+      '-o',
+      destino.path,
+      'https://www.youtube.com/watch?v=$videoId',
+    ];
+    try {
+      final res = await Process.run(
+        bin.path,
+        args,
+        environment: {'PATH': _pathMinimo},
+      ).timeout(const Duration(seconds: 40));
+      if (res.exitCode != 0 || !destino.existsSync()) {
+        debugPrint('NeoTube: descarga completa de $videoId falló '
+            '(exit ${res.exitCode}): ${res.stderr}');
+        return null;
+      }
+      debugPrint('NeoTube: descarga completa de $videoId lista '
+          '(${destino.lengthSync()} bytes)');
+      _registrarContinuacion(destino);
+      return destino;
+    } catch (e) {
+      debugPrint('NeoTube: descarga completa de $videoId lanzó: $e');
+      return null;
+    }
+  }
+
+  Directory? _carpetaDeContinuaciones;
+
+  Future<Directory> _dirDeContinuaciones() async {
+    final actual = _carpetaDeContinuaciones;
+    if (actual != null) return actual;
+    final dir = Directory(p.join(Directory.systemTemp.path, 'neotube_continuaciones'));
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return _carpetaDeContinuaciones = dir;
+  }
+
+  /// Los ficheros de [_descargarCompletaConYtDlp] que están vivos ahora
+  /// mismo, del más viejo al más nuevo. Cada pista de más de un minuto deja
+  /// uno, y son varios MB cada uno — sin límite, sería una fuga de disco en
+  /// una sesión de escucha larga. Se quedan solo los dos últimos: la pista
+  /// actual y la anterior, por si un salto hacia atrás la necesita todavía.
+  final List<File> _continuacionesGuardadas = [];
+  static const _maxContinuacionesGuardadas = 2;
+
+  void _registrarContinuacion(File f) {
+    _continuacionesGuardadas.add(f);
+    while (_continuacionesGuardadas.length > _maxContinuacionesGuardadas) {
+      final viejo = _continuacionesGuardadas.removeAt(0);
+      try {
+        if (viejo.existsSync()) viejo.deleteSync();
+      } catch (_) {
+        // Se queda en disco hasta el próximo reinicio; no es grave.
+      }
+    }
+  }
+
   /// Traduce el `stderr` de yt-dlp (que puede ser un vertedero de varias
   /// líneas de WARNING/ERROR en inglés) a algo corto y en español que tenga
   /// sentido en un SnackBar. El texto completo se queda en el log
@@ -568,7 +667,12 @@ class YtPlayer extends ChangeNotifier {
       // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
       // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
       debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
-      final urlLocal = await _proxy.exponer(url);
+      _pistaConCorte = null;
+      _continuaciones.putIfAbsent(t.videoId, () => _descargarCompletaConYtDlp(t.videoId));
+      final urlLocal = await _proxy.exponer(
+        url,
+        onCorte: () => _pistaConCorte = t.videoId,
+      );
       await mpv.open(Media(urlLocal.toString()));
       _adelantarSiguiente();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
@@ -619,7 +723,11 @@ class YtPlayer extends ChangeNotifier {
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
       if (actual?.videoId != t.videoId) return;
-      final urlLocal = await _proxy.exponer(urlFresca);
+      _continuaciones.putIfAbsent(t.videoId, () => _descargarCompletaConYtDlp(t.videoId));
+      final urlLocal = await _proxy.exponer(
+        urlFresca,
+        onCorte: () => _pistaConCorte = t.videoId,
+      );
       await _mpv?.open(Media(urlLocal.toString()));
       _temporizadorAbriendo?.cancel();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
@@ -631,6 +739,44 @@ class YtPlayer extends ChangeNotifier {
         error = 'Error de reproducción: $e';
         notifyListeners();
       }
+    }
+  }
+
+  /// Retoma una pista que se quedó a medias por el corte de posición de la
+  /// vía rápida (ver `yt_local_proxy.dart`) — lo llama el listener de
+  /// `mpv.stream.completed` cuando ese "completado" no era el final de
+  /// verdad. **No sigue la misma conexión**: eso es justo lo que no funciona
+  /// (empalmar bytes de dos descargas independientes corrompe el contenedor,
+  /// ver el porqué en `yt_local_proxy.dart`). En vez de eso, reabre en el
+  /// fichero de la descarga completa y salta a donde iba con `Media.start`,
+  /// que dos ficheros de verdad sí soportan sin problema.
+  Future<void> _continuarTrasCorte(YtTrack t) async {
+    _pistaConCorte = null;
+    final posicion = _mpv?.state.position ?? Duration.zero;
+    final futuro = _continuaciones[t.videoId];
+    final archivo = futuro == null ? null : await futuro;
+    // Si mientras se esperaba la descarga el usuario ya saltó de pista, no
+    // hay nada que retomar: la pista actual es otra.
+    if (actual?.videoId != t.videoId) return;
+    if (archivo == null || !archivo.existsSync()) {
+      // No hay descarga de repuesto (falló, o no dio tiempo): se acepta el
+      // corte como si de verdad hubiera sido el final.
+      if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
+      return;
+    }
+    debugPrint('NeoTube: retomando ${t.videoId} desde $posicion tras el corte');
+    _cambiando = true;
+    notifyListeners();
+    try {
+      await _mpv?.open(Media(archivo.path, start: posicion));
+    } catch (e) {
+      debugPrint('NeoTube: no se pudo retomar ${t.videoId}: $e');
+      if (actual?.videoId == t.videoId && cola.isNotEmpty) {
+        unawaited(siguiente(automatico: true));
+      }
+    } finally {
+      _cambiando = false;
+      notifyListeners();
     }
   }
 
@@ -743,6 +889,7 @@ class YtPlayer extends ChangeNotifier {
     _temporizadorAbriendo?.cancel();
     _pistaAbriendo = null;
     _reintentosHechos = 0;
+    _pistaConCorte = null;
     await _mpv?.stop();
     cola = const [];
     indice = -1;

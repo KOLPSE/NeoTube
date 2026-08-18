@@ -216,7 +216,7 @@ valida descargándola.** Hay que abrirla con el reproductor de verdad. La única
 es `flutter run` con `MPVLogLevel.debug` en el constructor del `Player` y mirar el log de mpv;
 por HTTP todo parecía correcto, y el `Failed to open` de `media_kit` no dice el motivo.
 
-### ⚠️ El `403` no era de `IOS`: era de pedir el fichero de un tirón
+### ⚠️ El `403` no era de `IOS`: era de pedir el fichero de un tirón — y esto es SABR
 
 Meses después volvió el mismo síntoma con `ANDROID_VR`, la única vez que parecía imposible:
 `flutter run` con `MPVLogLevel.debug` mostraba `ffmpeg: https: HTTP error 403 Forbidden` contra
@@ -231,21 +231,70 @@ por debajo, sin `package:http` de por medio): cabeceras, identidad de visitante 
 |---|---|
 | `bytes=0-900000` | `206`, sirve |
 | `bytes=0-1000000` | `403` |
+| `bytes=900000-1799999`, con una **URL recién resuelta y nunca usada** | `403` igual |
 | `bytes=0-` (lo que pide libmpv al abrir, sin más) | `403` |
 
-**googlevideo corta en 1.000.000 de bytes exactos.** libmpv, al abrir un stream nuevo, pide
-`Range: bytes=0-` — el fichero entero de un golpe —, así que siempre cae del lado malo del
-corte. No es un fallo de `ANDROID_VR` ni de las cabeceras: es que nadie estaba troceando la
-descarga. yt-dlp no lo sufre porque trocea las suyas por su cuenta (`--http-chunk-size`); aquí
-no hay yt-dlp de por medio en la vía rápida.
+**googlevideo corta en 1.000.000 de bytes exactos, y es un tope de posición, no un cupo que se
+gasta**: una URL fresca pidiendo directamente la "segunda mitad" falla igual que la que ya venía
+de servir la primera. libmpv, al abrir un stream nuevo, pide `Range: bytes=0-` —el fichero
+entero de un golpe—, así que siempre cae del lado malo del corte.
 
-La solución, en `yt_local_proxy.dart`: un servidor HTTP en `127.0.0.1` que libmpv abre en vez de
-la URL de googlevideo. El proxy sí pide en trozos de 900 000 bytes (con `dart:io HttpClient`,
-que transmite según llega en vez de cargar la respuesta entera como `package:http`) y se los
-retransmite a libmpv como una respuesta continua, incluido el `Range` que libmpv mande al
-buscar en la canción. Si mañana vuelve a fallar algo con este aspecto, **medir el tamaño del
-trozo antes que sospechar del cliente o de las cabeceras** — ya se investigó por ahí una vez y
-no era eso.
+**Y yt-dlp, con su cliente por defecto, tropieza exactamente igual** — probado a pelo, sin nada
+de este código de por medio: mismo vídeo, mismo `403`, ni siquiera baja el primer byte. Encaja
+con lo que yt-dlp llama SABR (*Server Ad-Behavior Reporting*, github.com/yt-dlp/yt-dlp#12482):
+YouTube está sustituyendo la descarga progresiva por rangos por un protocolo servido a medida, y
+`ANDROID_VR` sin ese protocolo solo sirve el primer tramo — probablemente pensado como margen
+para que el reproductor arranque, no como un fallo a explotar.
+
+De los clientes de yt-dlp probados uno por uno (`ios`, `tv`, `tv_simply`, `web`, `web_safari`,
+`mweb`, `android`, `web_creator`, `web_music`…), el único que **descargó el fichero entero** fue
+`WEB_EMBEDDED_PLAYER`. Pero pedir esa URL desde `dart:io HttpClient` —con las cabeceras exactas
+que manda yt-dlp, copiadas con `--print-traffic`— **también da `403`**: esa URL solo la sirve un
+cliente con la huella TLS de un navegador de verdad (`curl_cffi`, la librería que usa yt-dlp por
+debajo para imitar el *fingerprint* TLS de Chrome). Dart no la puede replicar. Así que la única
+vía que de verdad consigue el fichero completo es dejar que **yt-dlp haga la descarga entera**
+(`_descargarCompletaConYtDlp` en `yt_player.dart`, con `-o <fichero>` y
+`--extractor-args youtube:player_client=web_embedded`), no solo resolver su URL con `-g`.
+
+### ⚠️ Por qué el arreglo no empalma bytes, aunque parezca lo obvio
+
+El primer intento fue trocear también la descarga de repuesto y, al chocar con el corte,
+**servir el resto en la misma respuesta HTTP** (`yt_local_proxy.dart` pedía el trozo que
+faltaba a la URL de `WEB_EMBEDDED_PLAYER` y lo pegaba a continuación de lo que ya venía de
+`ANDROID_VR`). El tamaño cuadraba exacto —hasta el último byte— y aun así la canción se cortaba
+igual, unos segundos más tarde, sin ningún error de libmpv.
+
+La razón: son **dos descargas independientes** del mismo audio, y un contenedor como WebM no es
+una tira plana de bytes — está organizado en *clusters* que el códec coloca donde le conviene a
+él, no en el byte 900 000 (un número elegido aquí, sin relación con esa estructura). Empalmar
+ahí cae casi siempre a mitad de un bloque. mpv no lanza un error al toparse con eso: el
+demuxer simplemente deja de encontrar datos válidos y da la pista por terminada en silencio —
+exactamente el mismo síntoma que el bug original, solo que corregido en apariencia y roto igual
+por debajo.
+
+### La solución de verdad: reabrir en un fichero aparte y saltar, no empalmar
+
+`yt_local_proxy.dart` solo sirve la vía rápida troceada en 900 000 bytes (con `dart:io
+HttpClient`, que transmite según llega en vez de cargar la respuesta entera como
+`package:http`) y, si un trozo posterior al primero falla, **avisa con un `onCorte` y corta
+limpio** — sin `Content-Length` declarado de antemano (así una respuesta corta es válida, no
+rota) y sin intentar rellenar el resto él mismo.
+
+Quien reacciona es `YtPlayer`: en paralelo, desde que arranca la pista, ya está descargando el
+fichero entero por yt-dlp (`_descargarCompletaConYtDlp`, deja el resultado en
+`_continuaciones`). Cuando `mpv.stream.completed` dispara y coincide con el aviso de corte
+(`_pistaConCorte`), en vez de saltar a la siguiente pista, `_continuarTrasCorte` **reabre** el
+reproductor apuntando al fichero ya descargado y salta a la posición donde iba con
+`Media(archivo, start: posicion)` — dos ficheros de verdad sí se pueden encadenar así, sin
+corrupción. Se nota un parón de bien menos de un segundo en ese punto (parar, cargar el fichero
+nuevo, saltar), pero la canción sigue en vez de saltar a la siguiente. Los ficheros descargados
+se guardan en `Directory.systemTemp` y se limitan a los dos últimos (la pista actual y la
+anterior); de tres en adelante se van borrando solos.
+
+Si mañana vuelve a fallar algo con este aspecto: **medir el tamaño del trozo y comprobar en qué
+posición corta antes que sospechar del cliente o de las cabeceras** — ya se investigó por ahí
+una vez y no era eso. Y si se te ocurre "empalmar en la misma conexión", ya se probó: no
+funciona, y el porqué está arriba.
 
 ### ⚠️ `ANDROID_VR` sin `visitorData` es "confirma que no eres un bot"
 

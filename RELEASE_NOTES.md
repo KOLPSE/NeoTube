@@ -1,25 +1,22 @@
-## Reproducción: se encontró la causa de verdad, y no era la que se pensaba
+## Reproducción: arreglado el corte a mitad de canción
 
-Las versiones anteriores explicaban los cortes de reproducción como una identidad de sesión
-que se iba "gastando". Era la explicación equivocada. La causa real: **YouTube corta cualquier
-descarga de audio en cuanto pasa de 1 000 000 de bytes exactos**, y `libmpv` pedía el fichero
-entero de un tirón al abrir una canción — así que caía del lado malo del corte prácticamente
-siempre, no de vez en cuando.
+Cualquier canción de más de un minuto largo se cortaba y saltaba sola a la siguiente. La causa
+no tenía nada que ver con identidades de sesión ni con reintentos: **YouTube deja de servir el
+audio de esta app pasado 1.000.000 de bytes exactos** (un límite nuevo, del protocolo de
+streaming con el que está sustituyendo la descarga progresiva de toda la vida — hasta el propio
+`yt-dlp`, con su cliente habitual, tropieza con el mismo muro).
 
-La solución no era reintentar con otra identidad (eso solo cambiaba la matrícula del mismo
-coche parado en el mismo sitio): ahora NeoTube monta un pequeño servidor en `127.0.0.1` que
-pide el audio en trozos de 900 000 bytes y se lo va pasando a `libmpv` como si fuera un
-fichero continuo. `libmpv` ya no habla con los servidores de YouTube directamente.
-
-Probado en varias sesiones seguidas sin un solo corte. Sigue habiendo un plan B automático
-(yt-dlp) por si algún día cambia el límite, pero la causa de fondo ya no depende de adivinar
-identidades.
+La solución: en cuanto empieza a sonar una canción, NeoTube ya está bajando en segundo plano una
+copia completa por otra vía. Si la vía rápida choca con el corte, la app **retoma exactamente
+donde iba** con esa copia — se nota un parón de bien menos de un segundo en ese punto, pero la
+canción sigue en vez de saltar. Esas copias no se acumulan: solo se guardan las dos últimas y se
+borran solas.
 
 ## Reintento más persistente
 
-Si una pista aun así no arranca a la primera, ahora se reintenta hasta dos veces (antes, una)
-antes de rendirse, y el error que se enseña viene traducido y resumido en vez del volcado en
-inglés de yt-dlp.
+Si una pista aun así no arranca a la primera, se reintenta hasta dos veces (antes, una) antes de
+rendirse, y el error que se enseña viene traducido y resumido en vez del volcado en inglés de
+yt-dlp.
 
 ## Deno viaja empaquetado
 
