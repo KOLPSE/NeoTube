@@ -19,6 +19,15 @@ if (-not (Test-Path $ytdlp)) {
 }
 if (-not (Test-Path $ytdlp)) { throw "No se encuentra $ytdlp" }
 
+# --- 1b. Deno (runtime de JS que yt-dlp necesita para descifrar firmas) ----
+$deno = "tool\ytdlp-build\bin\deno.exe"
+Paso "Comprobando Deno"
+if (-not (Test-Path $deno)) {
+  & powershell -ExecutionPolicy Bypass -File tool\fetch_deno.ps1
+  if ($LASTEXITCODE -ne 0) { throw "Falló la descarga de Deno" }
+}
+if (-not (Test-Path $deno)) { throw "No se encuentra $deno" }
+
 # --- 2. La app -------------------------------------------------------------
 Paso "Compilando NeoTube (Release)"
 # Cerrar procesos que puedan bloquear la escritura de ejecutables/dlls.

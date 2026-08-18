@@ -47,6 +47,7 @@ Cuatro piezas, cuatro ficheros. Todo lo demás es interfaz.
 | `yt_models.dart` | `YtTrack`, `YtItem`, `YtSection`, `YtColeccion`, `YtTipo`. |
 | `yt_player.dart` | La cola y el sonido: libmpv, y el plan B de yt-dlp. |
 | `yt_stream.dart` | Resuelve la URL del stream por `youtubei/v1/player`. Dart puro, sin Flutter dentro. |
+| `yt_local_proxy.dart` | Retransmite esa URL en `127.0.0.1`, troceada, porque libmpv no puede pedirla de un tirón. Ver §5. |
 | `yt_home_store.dart` | Estado de una pantalla de secciones (portada, explorar, biblioteca). |
 | `discord_rpc.dart` | Rich Presence por IPC nativo de Discord. Apagado por defecto. |
 
@@ -214,6 +215,37 @@ La consecuencia práctica, que vale para cualquier cambio futuro aquí: **una UR
 valida descargándola.** Hay que abrirla con el reproductor de verdad. La única forma de verlo
 es `flutter run` con `MPVLogLevel.debug` en el constructor del `Player` y mirar el log de mpv;
 por HTTP todo parecía correcto, y el `Failed to open` de `media_kit` no dice el motivo.
+
+### ⚠️ El `403` no era de `IOS`: era de pedir el fichero de un tirón
+
+Meses después volvió el mismo síntoma con `ANDROID_VR`, la única vez que parecía imposible:
+`flutter run` con `MPVLogLevel.debug` mostraba `ffmpeg: https: HTTP error 403 Forbidden` contra
+la misma IP de CDN, con firmas frescas, en el 100% de los intentos — no ocasional, sistemático.
+
+Se aisló variable a variable con `dart:io HttpClient` puro (mismo cliente HTTP que ffmpeg usa
+por debajo, sin `package:http` de por medio): cabeceras, identidad de visitante y cliente
+(`ANDROID_VR`/`IOS`) daban igual. Lo único que cambiaba el resultado era **el tamaño del
+`Range` pedido**. Con la misma URL, la misma sesión, la misma prueba:
+
+| `Range` pedido | resultado |
+|---|---|
+| `bytes=0-900000` | `206`, sirve |
+| `bytes=0-1000000` | `403` |
+| `bytes=0-` (lo que pide libmpv al abrir, sin más) | `403` |
+
+**googlevideo corta en 1.000.000 de bytes exactos.** libmpv, al abrir un stream nuevo, pide
+`Range: bytes=0-` — el fichero entero de un golpe —, así que siempre cae del lado malo del
+corte. No es un fallo de `ANDROID_VR` ni de las cabeceras: es que nadie estaba troceando la
+descarga. yt-dlp no lo sufre porque trocea las suyas por su cuenta (`--http-chunk-size`); aquí
+no hay yt-dlp de por medio en la vía rápida.
+
+La solución, en `yt_local_proxy.dart`: un servidor HTTP en `127.0.0.1` que libmpv abre en vez de
+la URL de googlevideo. El proxy sí pide en trozos de 900 000 bytes (con `dart:io HttpClient`,
+que transmite según llega en vez de cargar la respuesta entera como `package:http`) y se los
+retransmite a libmpv como una respuesta continua, incluido el `Range` que libmpv mande al
+buscar en la canción. Si mañana vuelve a fallar algo con este aspecto, **medir el tamaño del
+trozo antes que sospechar del cliente o de las cabeceras** — ya se investigó por ahí una vez y
+no era eso.
 
 ### ⚠️ `ANDROID_VR` sin `visitorData` es "confirma que no eres un bot"
 

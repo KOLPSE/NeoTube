@@ -151,6 +151,19 @@ else()
   message(WARNING "No se encuentra yt-dlp; ejecuta tool/fetch_ytdlp.sh antes de empaquetar (las cuentas sin Premium no sonaran sin el).")
 endif()
 
+# Deno: el runtime de JavaScript que yt-dlp necesita para descifrar firmas.
+# Sin el, yt-dlp cae a una extraccion mas fragil (mas peticiones a paginas
+# web) que es lo que dispara los 429 y el aviso de "confirma que no eres un
+# bot" que ven los usuarios cuando la via rapida ya ha fallado.
+set(DENO_BIN "${CMAKE_CURRENT_SOURCE_DIR}/../tool/ytdlp-build/bin/deno")
+if(EXISTS "${DENO_BIN}")
+  install(PROGRAMS "${DENO_BIN}"
+    DESTINATION "${CMAKE_INSTALL_PREFIX}"
+    COMPONENT Runtime)
+else()
+  message(WARNING "No se encuentra deno; ejecuta tool/fetch_deno.sh antes de empaquetar.")
+endif()
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/linux/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"

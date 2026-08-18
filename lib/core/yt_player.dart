@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import 'procesos.dart' show sufijoEjecutable;
 import 'yt_auth.dart';
+import 'yt_local_proxy.dart';
 import 'yt_models.dart';
 import 'yt_music_api.dart' show YtMusicApi;
 import 'yt_stream.dart';
@@ -78,9 +79,9 @@ class YtPlayer extends ChangeNotifier {
     _subDuracion = mpv.stream.duration.listen((_) => notifyListeners());
     _subError = mpv.stream.error.listen((e) {
       debugPrint('NeoTube: libmpv informa de un error: $e '
-          '(abriendo=$_pistaAbriendo, reintentoUsado=$_reintentoUsado)');
-      if (_pistaAbriendo != null && !_reintentoUsado) {
-        _reintentoUsado = true;
+          '(abriendo=$_pistaAbriendo, reintentosHechos=$_reintentosHechos)');
+      if (_pistaAbriendo != null && _reintentosHechos < _maxReintentos) {
+        _reintentosHechos++;
         final pista = actual;
         if (pista != null && pista.videoId == _pistaAbriendo) {
           unawaited(_reintentarConUrlFresca(pista));
@@ -129,6 +130,11 @@ class YtPlayer extends ChangeNotifier {
   /// Quien resuelve las URLs por la vía rápida. yt-dlp se queda de plan B, más
   /// abajo.
   final YtStreamResolver _stream;
+
+  /// Por dónde pasan todas las URLs de audio antes de llegar a libmpv. Ver
+  /// `yt_local_proxy.dart` para el porqué: ffmpeg recibe `403` de googlevideo
+  /// pidiendo la misma URL que un cliente HTTP normal sí consigue.
+  final YtLocalProxy _proxy = YtLocalProxy();
 
   StreamSubscription<bool>? _subCompletado;
   StreamSubscription<String>? _subError;
@@ -222,7 +228,17 @@ class YtPlayer extends ChangeNotifier {
   /// se trata como "no se pudo abrir" (con un reintento silencioso) y no como
   /// un fallo de reproducción en mitad de una canción que ya sonaba.
   String? _pistaAbriendo;
-  bool _reintentoUsado = false;
+
+  /// Cuántas veces se ha reintentado la pista que se está abriendo.
+  ///
+  /// Antes era un booleano y se rendía al primer fallo del reintento. En la
+  /// práctica una pista concreta a veces rechaza **dos** URLs seguidas —dos
+  /// identidades distintas, dos servidores de CDN distintos, con segundos de
+  /// diferencia— y la tercera sí suena: es justo lo que hacía manualmente
+  /// quien cambiaba de canción y volvía a la de antes. [_maxReintentos] deja
+  /// que la app haga ese mismo tercer intento sola antes de rendirse.
+  int _reintentosHechos = 0;
+  static const _maxReintentos = 2;
   Timer? _temporizadorAbriendo;
 
   /// URLs ya resueltas, con su caducidad. Se limita a un puñado: no es una
@@ -421,11 +437,43 @@ class YtPlayer extends ChangeNotifier {
     ];
     final res = await _ejecutar(bin.path, args);
     if (res.exitCode != 0) {
-      throw YtPlayerException('yt-dlp no pudo resolver el vídeo: ${res.stderr}');
+      final stderr = '${res.stderr}';
+      debugPrint('NeoTube: yt-dlp falló (exit ${res.exitCode}):\n$stderr');
+      throw YtPlayerException(_motivoDeFalloYtDlp(stderr));
     }
     final url = (res.stdout as String).trim().split('\n').first.trim();
     if (url.isEmpty) throw YtPlayerException('yt-dlp no devolvió ninguna URL.');
     return url;
+  }
+
+  /// Traduce el `stderr` de yt-dlp (que puede ser un vertedero de varias
+  /// líneas de WARNING/ERROR en inglés) a algo corto y en español que tenga
+  /// sentido en un SnackBar. El texto completo se queda en el log
+  /// (`debugPrint` en [_resolverConYtDlp]) para quien necesite mirarlo de
+  /// verdad; esto es solo lo que ve el usuario.
+  static String _motivoDeFalloYtDlp(String stderr) {
+    final texto = stderr.toLowerCase();
+    if (texto.contains('429') || texto.contains('too many requests')) {
+      return 'YouTube está limitando las peticiones ahora mismo. '
+          'Prueba de nuevo en unos minutos.';
+    }
+    if (texto.contains('confirm you’re not a bot') ||
+        texto.contains("confirm you're not a bot") ||
+        texto.contains('sign in to confirm')) {
+      return 'YouTube ha pedido confirmar que no eres un robot. '
+          'Suele pasar solo, prueba de nuevo en un rato.';
+    }
+    if (texto.contains('private video')) {
+      return 'Ese vídeo es privado.';
+    }
+    if (texto.contains('video unavailable') || texto.contains('no longer available')) {
+      return 'Ese vídeo ya no está disponible.';
+    }
+    if (texto.contains('not available in your country') ||
+        texto.contains('not available on this app')) {
+      return 'YouTube no deja reproducir ese vídeo desde aquí.';
+    }
+    return 'yt-dlp no pudo resolver el vídeo. Consulta la consola para el detalle.';
   }
 
   /// Adelanta la resolución de las siguientes dos pistas mientras suena la actual.
@@ -507,7 +555,7 @@ class YtPlayer extends ChangeNotifier {
     if (t == null || mpv == null) return;
     _temporizadorAbriendo?.cancel();
     _pistaAbriendo = t.videoId;
-    _reintentoUsado = false;
+    _reintentosHechos = 0;
     _cambiando = true;
     resolviendo = t.videoId;
     error = null;
@@ -520,7 +568,8 @@ class YtPlayer extends ChangeNotifier {
       // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
       // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
       debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
-      await mpv.open(Media(url, httpHeaders: YtStreamResolver.cabecerasDeReproduccion));
+      final urlLocal = await _proxy.exponer(url);
+      await mpv.open(Media(urlLocal.toString()));
       _adelantarSiguiente();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
@@ -545,8 +594,8 @@ class YtPlayer extends ChangeNotifier {
   /// Pedirle otra URL al mismo sitio no sirve de nada cuando el problema no es
   /// que la URL esté caducada sino que googlevideo le contesta `403` a ffmpeg:
   /// la siguiente sale igual y falla igual, que es exactamente lo que se veía
-  /// —dos `Failed to open` seguidos por pista, con `reintentoUsado` en `false`
-  /// y luego en `true`—.
+  /// —`Failed to open` seguidos por pista, con `reintentosHechos` subiendo de
+  /// uno en uno—.
   ///
   /// Así que el reintento va por yt-dlp. Cuesta sus ~2,6 s, pero solo se paga
   /// cuando la vía rápida ya ha fallado, y es la que se ha visto sonar cuando
@@ -570,7 +619,8 @@ class YtPlayer extends ChangeNotifier {
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
       if (actual?.videoId != t.videoId) return;
-      await _mpv?.open(Media(urlFresca, httpHeaders: YtStreamResolver.cabecerasDeReproduccion));
+      final urlLocal = await _proxy.exponer(urlFresca);
+      await _mpv?.open(Media(urlLocal.toString()));
       _temporizadorAbriendo?.cancel();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
@@ -692,7 +742,7 @@ class YtPlayer extends ChangeNotifier {
   Future<void> stop() async {
     _temporizadorAbriendo?.cancel();
     _pistaAbriendo = null;
-    _reintentoUsado = false;
+    _reintentosHechos = 0;
     await _mpv?.stop();
     cola = const [];
     indice = -1;
@@ -710,6 +760,7 @@ class YtPlayer extends ChangeNotifier {
     unawaited(_subDuracion?.cancel());
     unawaited(_subLog?.cancel());
     _stream.dispose();
+    _proxy.dispose();
     unawaited(_mpv?.dispose());
     _volumen.dispose();
     super.dispose();

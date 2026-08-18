@@ -57,6 +57,10 @@ jobs:
         shell: pwsh
         run: powershell -ExecutionPolicy Bypass -File tool\fetch_ytdlp.ps1
 
+      - name: Descargar Deno
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File tool\fetch_deno.ps1
+
       - name: Compilar aplicación (Release)
         run: flutter build windows --release
 
@@ -138,6 +142,9 @@ jobs:
       - name: Descargar yt-dlp
         run: bash ./tool/fetch_ytdlp.sh
 
+      - name: Descargar Deno
+        run: bash ./tool/fetch_deno.sh
+
       - name: Compilar aplicación (Release)
         run: flutter build linux --release
 
@@ -147,13 +154,14 @@ jobs:
       - name: Verificar integridad del tarball
         run: |
           tar -tzf dist/NeoTube-*-linux-x86_64.tar.gz > /tmp/tarball.txt
-          for f in neotube yt-dlp \
+          for f in neotube yt-dlp deno \
                    xyz.neogex.neotube.desktop LICENSE \
                    data/icudtl.dat lib/libapp.so lib/libflutter_linux_gtk.so; do
             grep -q "/$f\$" /tmp/tarball.txt || { echo "El tarball no trae $f"; exit 1; }
           done
           tar -xzf dist/NeoTube-*-linux-x86_64.tar.gz -C /tmp
           /tmp/NeoTube-*-linux-x86_64/yt-dlp --version
+          /tmp/NeoTube-*-linux-x86_64/deno --version
           echo "Tarball verificado con éxito."
 
       - name: Guardar artefacto para Arch
@@ -202,7 +210,7 @@ jobs:
           tar -xzf dist/NeoTube-*-linux-x86_64.tar.gz
           cd NeoTube-*-linux-x86_64
           fallo=0
-          for bin in neotube yt-dlp; do
+          for bin in neotube yt-dlp deno; do
             faltan="$(ldd "$bin" 2>&1 | grep 'not found' || true)"
             if [ -n "$faltan" ]; then
               echo "::error::$bin no encuentra:"; echo "$faltan"; fallo=1
@@ -254,6 +262,8 @@ jobs:
           test -x /opt/neotube/neotube || { echo "::error::falta /opt/neotube/neotube"; exit 1; }
           test -x /opt/neotube/yt-dlp || { echo "::error::falta /opt/neotube/yt-dlp"; exit 1; }
           /opt/neotube/yt-dlp --version || { echo "::error::yt-dlp no arranca"; exit 1; }
+          test -x /opt/neotube/deno || { echo "::error::falta /opt/neotube/deno"; exit 1; }
+          /opt/neotube/deno --version || { echo "::error::deno no arranca"; exit 1; }
           test -d /opt/neotube/data || { echo "::error::falta /opt/neotube/data"; exit 1; }
           test -L /usr/bin/neotube || { echo "::error::/usr/bin/neotube no es un enlace"; exit 1; }
           test -f /usr/share/applications/xyz.neogex.neotube.desktop || { echo "::error::falta el .desktop"; exit 1; }

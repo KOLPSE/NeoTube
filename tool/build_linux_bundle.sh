@@ -22,6 +22,12 @@ echo "Actualizando yt-dlp..."
 bash ./tool/fetch_ytdlp.sh
 [ -x 'tool/ytdlp-build/bin/yt-dlp' ] || { echo "Falta tool/ytdlp-build/bin/yt-dlp" >&2; exit 1; }
 
+# Deno: el runtime de JavaScript que yt-dlp necesita para no caer a una
+# extracción más frágil (ver linux/CMakeLists.txt).
+echo "Actualizando Deno..."
+bash ./tool/fetch_deno.sh
+[ -x 'tool/ytdlp-build/bin/deno' ] || { echo "Falta tool/ytdlp-build/bin/deno" >&2; exit 1; }
+
 echo "Compilando la app para Linux (Release)..."
 flutter build linux --release
 
@@ -32,7 +38,10 @@ bundle='build/linux/x64/release/bundle'
 if [ ! -f "$bundle/yt-dlp" ]; then
   cp tool/ytdlp-build/bin/yt-dlp "$bundle/"
 fi
-chmod +x "$bundle/yt-dlp" "$bundle/neotube"
+if [ ! -f "$bundle/deno" ]; then
+  cp tool/ytdlp-build/bin/deno "$bundle/"
+fi
+chmod +x "$bundle/yt-dlp" "$bundle/deno" "$bundle/neotube"
 
 # Ficheros de integración de escritorio para el tarball.
 cp linux/packaging/xyz.neogex.neotube.desktop "$bundle/"

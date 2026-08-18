@@ -13,19 +13,6 @@ en una ventana de Google y ya.
 Se integra además con el escritorio: controles multimedia del sistema (SMTC en Windows, MPRIS
 en Linux) y **Discord Rich Presence** opcional, que se enciende en Ajustes y viene apagado.
 
-## ⚠️ La reproducción puede cortarse de vez en cuando
-
-**YouTube rechaza a veces la URL del stream que él mismo acaba de emitir.** Cuando pasa, esa
-canción tarda unos segundos de más en arrancar. No es un fallo de NeoTube ni de tu conexión:
-ocurre igual usando `yt-dlp` a pelo, sin NeoTube de por medio.
-
-La app lo resuelve sola —reintenta por otra vía y la canción suena—, así que lo único que se
-nota es que esa pista concreta empieza en ~2,5 s en vez de ~0,1 s. No hay que hacer nada; si
-se repite mucho, reiniciar la app renueva la identidad con la que se piden los streams.
-
-La causa exacta **no está identificada**. Hay una mitigación puesta (renovar esa identidad al
-detectar el problema y cada 30 minutos), pero no está demostrado que lo elimine del todo.
-
 ## Antes de tocar nada, lee [`CONTEXTO.md`](CONTEXTO.md)
 
 Ahí está cómo funciona todo y, sobre todo, **la lista de trampas de la API interna verificadas
