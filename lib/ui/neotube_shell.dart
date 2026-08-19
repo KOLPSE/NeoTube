@@ -6,6 +6,7 @@ import '../core/resource_monitor.dart';
 import '../core/settings.dart';
 import '../core/updater.dart';
 import '../core/yt_auth.dart';
+import '../core/yt_favoritos.dart';
 import '../core/yt_home_store.dart';
 import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
@@ -78,6 +79,8 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     abrir: (item) => setState(() => _abierto = item),
   );
 
+  late final YtFavoritos _favoritos = YtFavoritos(widget.api);
+
   String? _ultimoError;
 
   @override
@@ -85,6 +88,9 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     super.initState();
     _ultimoError = widget.player.error;
     widget.player.addListener(_onPlayerCambio);
+    // En diferido y sin esperarla: el corazón sale vacío hasta que llegue, y
+    // llega mucho antes de que dé tiempo a mirarlo.
+    unawaited(_favoritos.cargar());
   }
 
   @override
@@ -156,7 +162,8 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
           Expanded(child: _content()),
         ],
       ),
-      bottomNavigationBar: _BarraInferior(player: widget.player),
+      bottomNavigationBar:
+          _BarraInferior(player: widget.player, favoritos: _favoritos),
     );
   }
 
@@ -179,6 +186,7 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
         item: abierto,
         api: widget.api,
         player: widget.player,
+        favoritos: _favoritos,
         onVolver: () => setState(() => _abierto = null),
       );
     }
@@ -439,9 +447,10 @@ class _ColaScreen extends StatelessWidget {
 /// Barra inferior con carátula, anterior/play-pausa/siguiente y barra de
 /// progreso arrastrable.
 class _BarraInferior extends StatelessWidget {
-  const _BarraInferior({required this.player});
+  const _BarraInferior({required this.player, required this.favoritos});
 
   final YtPlayer player;
+  final YtFavoritos favoritos;
 
   @override
   Widget build(BuildContext context) {
@@ -533,7 +542,8 @@ class _BarraInferior extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    _BotonFavorita(favoritos: favoritos, pista: t),
+                    const SizedBox(width: 4),
                     IconButton(
                       icon: const Icon(Icons.shuffle),
                       tooltip: player.aleatorio ? 'Aleatorio: activado' : 'Aleatorio',
@@ -586,6 +596,44 @@ class _BarraInferior extends StatelessWidget {
     );
   },
 );
+  }
+}
+
+/// El corazón de "me gusta", a la derecha del nombre de la canción.
+///
+/// Lo que marca aquí va a la lista **Me gusta** de la cuenta de YouTube
+/// Music — la que se genera sola y ya se ve en Biblioteca —, no a una lista
+/// aparte de NeoTube: es el mismo like del cliente oficial.
+class _BotonFavorita extends StatelessWidget {
+  const _BotonFavorita({required this.favoritos, required this.pista});
+
+  final YtFavoritos favoritos;
+  final YtTrack pista;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AnimatedBuilder(
+      animation: favoritos,
+      builder: (context, _) {
+        final marcada = favoritos.esFavorita(pista.videoId);
+        final ocupada = favoritos.estaOcupada(pista.videoId);
+        return IconButton(
+          icon: Icon(marcada ? Icons.favorite : Icons.favorite_border),
+          color: marcada ? theme.colorScheme.primary : null,
+          tooltip: marcada ? 'Quitar de Me gusta' : 'Me gusta',
+          onPressed: ocupada
+              ? null
+              : () async {
+                  final ok = await favoritos.alternar(pista);
+                  if (ok || !context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No se pudo cambiar Me gusta.')),
+                  );
+                },
+        );
+      },
+    );
   }
 }
 
@@ -660,57 +708,123 @@ class _Progreso extends StatefulWidget {
 class _ProgresoState extends State<_Progreso> {
   double? _arrastrando;
 
+  /// El rojo de lo ya escuchado. Es el mismo con el que se siembra el tema
+  /// (ver `main.dart`), puesto a mano aquí para que no dependa de cómo lo
+  /// module `ColorScheme` en claro/oscuro: la barra necesita leerse como
+  /// roja en los dos para distinguirse del gris de la descarga.
+  static const _rojoEscuchado = Color(0xFFE53935);
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return StreamBuilder<Duration>(
-      stream: widget.player.cambiosDePosicion,
-      initialData: widget.player.posicion,
-      builder: (context, snapPos) {
-        final total = widget.player.duracion.inMilliseconds.toDouble();
-        final pos = (snapPos.data ?? Duration.zero).inMilliseconds.toDouble();
-        if (total <= 0) {
-          if (widget.player.resolviendo != null) {
-            return const SizedBox(
-              height: 24,
-              child: Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16),
-                  child: LinearProgressIndicator(minHeight: 2),
+    // `AnimatedBuilder` además del `StreamBuilder` de más abajo: la posición
+    // llega por su propio stream, pero `progresoDescargaRepuesto` se avisa
+    // con el `notifyListeners()` normal de `YtPlayer`, y sin escucharlo aquí
+    // la franja de la descarga de repuesto no se repintaría sola.
+    return AnimatedBuilder(
+      animation: widget.player,
+      builder: (context, _) {
+        return StreamBuilder<Duration>(
+          stream: widget.player.cambiosDePosicion,
+          initialData: widget.player.posicion,
+          builder: (context, snapPos) {
+            final total = widget.player.duracion.inMilliseconds.toDouble();
+            final pos = (snapPos.data ?? Duration.zero).inMilliseconds.toDouble();
+            if (total <= 0) {
+              if (widget.player.resolviendo != null) {
+                return const SizedBox(
+                  height: 24,
+                  child: Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                  ),
+                );
+              }
+              return const SizedBox(height: 24);
+            }
+            final valor = (_arrastrando ?? pos).clamp(0, total).toDouble();
+            final progresoDescarga = widget.player.progresoDescargaRepuesto;
+            return Row(
+              children: [
+                const SizedBox(width: 8),
+                Text(formatoDuracion(Duration(milliseconds: valor.round())),
+                    style: theme.textTheme.labelSmall),
+                Expanded(
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      // La franja de la descarga de repuesto, en gris claro
+                      // para que **no se confunda con el rojo de lo ya
+                      // escuchado**: son dos cosas distintas (cuánto hay a
+                      // salvo en disco contra por dónde va la canción) y
+                      // antes las dos iban del color de marca. La pinta esta
+                      // capa de abajo porque el `Slider` de encima, con su
+                      // tramo inactivo transparente, deja verla en la parte
+                      // que aún no ha sonado y la tapa sola en la que ya sonó.
+                      if (progresoDescarga != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          // `progresoDescargaRepuesto` ya llega suave (una
+                          // estimación por tiempo, no el tamaño real
+                          // descargado — ver el porqué en
+                          // `YtPlayer._descargarCompletaConYtDlp`), a pasos
+                          // de 150 ms; este `TweenAnimationBuilder` solo
+                          // interpola entre esos pasos para que no se note
+                          // el escalón.
+                          child: TweenAnimationBuilder<double>(
+                            tween: Tween(begin: 0, end: progresoDescarga),
+                            duration: const Duration(milliseconds: 150),
+                            curve: Curves.linear,
+                            builder: (context, valorAnimado, _) => FractionallySizedBox(
+                              alignment: Alignment.centerLeft,
+                              widthFactor: valorAnimado,
+                              child: Container(
+                                height: 4,
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      SliderTheme(
+                        data: SliderTheme.of(context).copyWith(
+                          trackHeight: 3,
+                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                          // Rojo explícito para lo ya escuchado, no el
+                          // `primary` del tema: en claro y en oscuro el tema
+                          // lo tiñe distinto, y aquí importa que se lea como
+                          // rojo siempre para contrastar con el gris de la
+                          // descarga.
+                          activeTrackColor: _rojoEscuchado,
+                          thumbColor: _rojoEscuchado,
+                          inactiveTrackColor: progresoDescarga == null
+                              ? null
+                              : theme.colorScheme.onSurface.withValues(alpha: 0.08),
+                        ),
+                        child: Slider(
+                          value: valor,
+                          max: total,
+                          onChanged: (v) => setState(() => _arrastrando = v),
+                          onChangeEnd: (v) {
+                            unawaited(widget.player.seek(Duration(milliseconds: v.round())));
+                            setState(() => _arrastrando = null);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                Text(formatoDuracion(Duration(milliseconds: total.round())),
+                    style: theme.textTheme.labelSmall),
+                const SizedBox(width: 8),
+              ],
             );
-          }
-          return const SizedBox(height: 24);
-        }
-        final valor = (_arrastrando ?? pos).clamp(0, total).toDouble();
-        return Row(
-          children: [
-            const SizedBox(width: 8),
-            Text(formatoDuracion(Duration(milliseconds: valor.round())),
-                style: theme.textTheme.labelSmall),
-            Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                  overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                ),
-                child: Slider(
-                  value: valor,
-                  max: total,
-                  onChanged: (v) => setState(() => _arrastrando = v),
-                  onChangeEnd: (v) {
-                    unawaited(widget.player.seek(Duration(milliseconds: v.round())));
-                    setState(() => _arrastrando = null);
-                  },
-                ),
-              ),
-            ),
-            Text(formatoDuracion(Duration(milliseconds: total.round())),
-                style: theme.textTheme.labelSmall),
-            const SizedBox(width: 8),
-          ],
+          },
         );
       },
     );

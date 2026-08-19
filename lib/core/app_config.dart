@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 ///
 /// Esta constante es la única fuente de verdad para el instalador y el
 /// actualizador.
-const String kVersion = '0.1.8';
+const String kVersion = '0.1.9';
 
 /// Repositorio de donde salen las actualizaciones.
 const String kRepoGitHub = 'KOLPSE/NeoTube';
@@ -58,6 +58,19 @@ Directory cacheDir() {
   return _cacheDir = dir;
 }
 
+/// Dónde viven de verdad las descargas de repuesto, ya resuelto: la carpeta
+/// que haya elegido el usuario en Ajustes ([AppConfig.rutaCacheContinuaciones])
+/// o, si no ha elegido ninguna, la de por defecto bajo [cacheDir].
+///
+/// Está aquí y no dentro de `YtPlayer` porque lo necesitan los dos: el
+/// reproductor para escribir, y Ajustes para **enseñar la ruta y lo que
+/// ocupa**. Que cada uno lo calculara por su cuenta es justo cómo acaban
+/// discrepando y enseñándole al usuario una carpeta que no es la que se usa.
+String rutaEfectivaDeCacheContinuaciones(String? elegida) =>
+    (elegida != null && elegida.trim().isNotEmpty)
+        ? elegida.trim()
+        : p.join(cacheDir().path, 'continuaciones');
+
 /// Una ruta base de XDG: la variable si es absoluta y, si no, el respaldo bajo
 /// `$HOME`.
 String? _xdg(String variable, String respaldo) {
@@ -81,11 +94,27 @@ class AppConfig {
   /// Client ID de la app de Discord. Por defecto el de NeoTube.
   String discordClientId;
 
+  /// Cuántos MB puede ocupar como máximo la caché de descargas de repuesto
+  /// (`YtPlayer._descargarCompletaConYtDlp`, ver ese fichero para el
+  /// porqué): la copia completa que se baja por si la vía rápida choca con
+  /// el corte de posición pasado el primer minuto. `0` la apaga del todo —
+  /// ni se descarga ni se guarda nada. Tope: 100 000 MB (100 GB).
+  int limiteCacheContinuacionesMB;
+
+  /// Dónde vive esa caché. `null` es el valor por defecto —
+  /// `cacheDir()/continuaciones`—; si el usuario elige otra carpeta (por
+  /// ejemplo, otra unidad con más sitio libre) se guarda aquí la ruta
+  /// absoluta. Cambiarla **no mueve** lo que ya hubiera en la carpeta
+  /// anterior — son copias desechables, se vuelven a bajar si hacen falta.
+  String? rutaCacheContinuaciones;
+
   AppConfig({
     this.performanceMode = false,
     this.volumenNeoTube = 60,
     this.discordRpcEnabled = false,
     this.discordClientId = kDiscordClientId,
+    this.limiteCacheContinuacionesMB = 300,
+    this.rutaCacheContinuaciones,
   });
 
   static File get _file => File(p.join(appDataDir().path, 'config.json'));
@@ -100,6 +129,8 @@ class AppConfig {
         volumenNeoTube: (map['volumenNeoTube'] as int?) ?? 60,
         discordRpcEnabled: (map['discordRpcEnabled'] as bool?) ?? false,
         discordClientId: (map['discordClientId'] as String?) ?? kDiscordClientId,
+        limiteCacheContinuacionesMB: (map['limiteCacheContinuacionesMB'] as int?) ?? 300,
+        rutaCacheContinuaciones: map['rutaCacheContinuaciones'] as String?,
       );
     } catch (_) {
       return AppConfig();
@@ -112,6 +143,8 @@ class AppConfig {
       'volumenNeoTube': volumenNeoTube,
       'discordRpcEnabled': discordRpcEnabled,
       'discordClientId': discordClientId,
+      'limiteCacheContinuacionesMB': limiteCacheContinuacionesMB,
+      'rutaCacheContinuaciones': rutaCacheContinuaciones,
     }));
   }
 }

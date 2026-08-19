@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../core/app_config.dart' show rutaEfectivaDeCacheContinuaciones;
 import '../core/resource_monitor.dart';
 import '../core/settings.dart';
 import '../core/updater.dart';
@@ -114,6 +116,8 @@ class _DialogoAjustes extends StatelessWidget {
                             ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                       ),
                     ),
+                    const Divider(height: 12),
+                    _CacheDeContinuaciones(settings: settings),
                     const Divider(height: 12),
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
@@ -346,6 +350,208 @@ class _CampoDiscordClientIdState extends State<_CampoDiscordClientId> {
         border: const OutlineInputBorder(),
       ),
       onSubmitted: (_) => _guardar(),
+    );
+  }
+}
+
+/// Cuánto puede ocupar en disco la caché de descargas de repuesto — la copia
+/// completa que se baja por si la vía rápida choca con el corte de posición
+/// pasado el primer minuto (ver `YtPlayer._descargarCompletaConYtDlp`). En
+/// `0 MB` se apaga del todo: ni se descarga ni se guarda nada.
+class _CacheDeContinuaciones extends StatefulWidget {
+  const _CacheDeContinuaciones({required this.settings});
+
+  final Settings settings;
+
+  @override
+  State<_CacheDeContinuaciones> createState() => _CacheDeContinuacionesState();
+}
+
+class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
+  double? _arrastrando;
+  late final TextEditingController _rutaController;
+  late final FocusNode _rutaFoco;
+
+  /// Lo que ocupa ahora mismo la carpeta, y cuántas canciones hay. Se mide al
+  /// abrir Ajustes y tras vaciarla: es una lectura de disco, no algo que
+  /// tenga sentido repetir en cada repintado.
+  int? _bytesEnDisco;
+  int? _cancionesEnDisco;
+
+  /// 100 GB exactos, en MB — que es la unidad en la que se guarda de verdad.
+  static const _maxMB = 100 * 1024.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _rutaController = TextEditingController(text: widget.settings.rutaCacheContinuaciones ?? '');
+    _rutaFoco = FocusNode()..addListener(_alPerderElFocoDeRuta);
+    unawaited(_medir());
+  }
+
+  String get _rutaEfectiva =>
+      rutaEfectivaDeCacheContinuaciones(widget.settings.rutaCacheContinuaciones);
+
+  Future<void> _medir() async {
+    var bytes = 0;
+    var cuenta = 0;
+    try {
+      final dir = Directory(_rutaEfectiva);
+      if (dir.existsSync()) {
+        await for (final e in dir.list()) {
+          if (e is! File) continue;
+          bytes += await e.length();
+          cuenta++;
+        }
+      }
+    } catch (_) {
+      // Carpeta inaccesible: se enseña como vacía, que es lo único honesto
+      // que se puede decir sin poder mirarla.
+    }
+    if (!mounted) return;
+    setState(() {
+      _bytesEnDisco = bytes;
+      _cancionesEnDisco = cuenta;
+    });
+  }
+
+  Future<void> _vaciar() async {
+    try {
+      final dir = Directory(_rutaEfectiva);
+      if (dir.existsSync()) {
+        await for (final e in dir.list()) {
+          if (e is File) await e.delete().catchError((_) => e);
+        }
+      }
+    } catch (_) {
+      // Lo que no se pueda borrar se queda; la medición de después lo dirá.
+    }
+    await _medir();
+  }
+
+  void _alPerderElFocoDeRuta() {
+    if (!_rutaFoco.hasFocus) _guardarRuta();
+  }
+
+  void _guardarRuta() {
+    unawaited(
+      widget.settings.setRutaCacheContinuaciones(_rutaController.text).then((_) => _medir()),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _CacheDeContinuaciones oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final ruta = widget.settings.rutaCacheContinuaciones ?? '';
+    if (ruta != _rutaController.text) _rutaController.text = ruta;
+  }
+
+  @override
+  void dispose() {
+    _rutaFoco.removeListener(_alPerderElFocoDeRuta);
+    _rutaFoco.dispose();
+    _rutaController.dispose();
+    super.dispose();
+  }
+
+  static String _etiqueta(double mb) {
+    if (mb == 0) return 'Apagada';
+    if (mb < 1024) return '${mb.round()} MB';
+    return '${(mb / 1024).toStringAsFixed(mb % 1024 == 0 ? 0 : 1)} GB';
+  }
+
+  static String _enMB(int bytes) {
+    final mb = bytes / (1024 * 1024);
+    if (mb < 1024) return '${mb.toStringAsFixed(mb < 10 ? 1 : 0)} MB';
+    return '${(mb / 1024).toStringAsFixed(1)} GB';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final valor =
+        (_arrastrando ?? widget.settings.limiteCacheContinuacionesMB.toDouble())
+            .clamp(0.0, _maxMB);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Caché de reproducción', style: theme.textTheme.titleSmall),
+        Text(
+          'Una caché para que la reproducción sea fluida. En 0 se apaga.',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Slider(
+                value: valor,
+                max: _maxMB,
+                divisions: 100, // pasos de 1 GB
+                label: _etiqueta(valor),
+                onChanged: (v) => setState(() => _arrastrando = v),
+                onChangeEnd: (v) {
+                  unawaited(widget.settings.setLimiteCacheContinuaciones(v.round()));
+                  setState(() => _arrastrando = null);
+                },
+              ),
+            ),
+            SizedBox(
+              width: 64,
+              child: Text(
+                _etiqueta(valor),
+                textAlign: TextAlign.end,
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        TextField(
+          controller: _rutaController,
+          focusNode: _rutaFoco,
+          style: theme.textTheme.bodySmall,
+          decoration: InputDecoration(
+            labelText: 'Carpeta de la caché',
+            hintText: 'Vacío = la de por defecto',
+            helperText: 'No mueve lo que ya haya en la carpeta anterior.',
+            helperMaxLines: 2,
+            helperStyle: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            isDense: true,
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (_) => _guardarRuta(),
+        ),
+        const SizedBox(height: 8),
+        // La ruta de verdad, siempre: con el campo de arriba vacío no había
+        // manera de saber **dónde** se está guardando, que es justo lo
+        // primero que uno quiere comprobar de una caché en disco.
+        Text('Se guarda en', style: theme.textTheme.labelSmall),
+        SelectableText(
+          _rutaEfectiva,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _bytesEnDisco == null
+                    ? 'Midiendo…'
+                    : '${_enMB(_bytesEnDisco!)} en uso · '
+                        '${_cancionesEnDisco == 1 ? "1 canción" : "$_cancionesEnDisco canciones"}',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+            TextButton(
+              onPressed: (_bytesEnDisco ?? 0) == 0 ? null : () => unawaited(_vaciar()),
+              child: const Text('Vaciar'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

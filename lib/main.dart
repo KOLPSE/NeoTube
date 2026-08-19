@@ -140,6 +140,7 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
   late final YtMusicApi _api = YtMusicApi(widget.auth);
   late final YtPlayer _player = YtPlayer(
     volumenInicial: widget.config.volumenNeoTube,
+    config: widget.config,
   );
   late final ResourceMonitor _ram = ResourceMonitor(
     pidsDeSidecars: () => const <int?>[],

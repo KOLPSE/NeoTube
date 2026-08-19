@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/yt_favoritos.dart';
 import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
 import '../core/yt_player.dart';
@@ -20,12 +21,14 @@ class YtPlaylistScreen extends StatefulWidget {
     required this.item,
     required this.api,
     required this.player,
+    required this.favoritos,
     required this.onVolver,
   });
 
   final YtItem item;
   final YtMusicApi api;
   final YtPlayer player;
+  final YtFavoritos favoritos;
   final VoidCallback onVolver;
 
   @override
@@ -39,10 +42,66 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
   String? _error;
   StreamSubscription<YtColeccion>? _sub;
 
+  /// El `videoId` que acaba de entrar en la lista y aún se está animando.
+  String? _recienAnadida;
+
+  /// La última [YtFavoritos.revision] ya reflejada aquí, para no repetir el
+  /// mismo cambio en cada `notifyListeners`.
+  int _revisionAplicada = 0;
+
+  /// ¿Es *esta* la lista de "Me gusta"? Solo ahí tiene sentido que dar like
+  /// añada una fila: en un álbum o en una playlist cualquiera, el like no
+  /// cambia lo que se está mirando.
+  bool get _esListaDeFavoritos {
+    final id = widget.item.playlistId ?? widget.item.browseId ?? '';
+    final limpio = id.startsWith('VL') ? id.substring(2) : id;
+    return limpio == 'LM';
+  }
+
   @override
   void initState() {
     super.initState();
+    _revisionAplicada = widget.favoritos.revision;
+    widget.favoritos.addListener(_onFavoritosCambio);
     _cargar();
+  }
+
+  /// Refleja en la lista abierta el like que se acaba de dar o quitar.
+  ///
+  /// Antes había que salir de la lista y volver a entrar para verlo: la
+  /// colección se pide una vez y se queda como está, y el like solo tocaba
+  /// el conjunto de favoritos. Aquí se aplica el cambio sobre las pistas que
+  /// ya hay en pantalla, sin volver a pedir nada.
+  void _onFavoritosCambio() {
+    if (!mounted || !_esListaDeFavoritos) return;
+    final favs = widget.favoritos;
+    if (favs.revision == _revisionAplicada) return;
+    _revisionAplicada = favs.revision;
+    final cambio = favs.ultimoCambio;
+    final c = _coleccion;
+    if (cambio == null || c == null) return;
+
+    final pistas = [...c.pistas];
+    final estaba = pistas.indexWhere((t) => t.videoId == cambio.pista.videoId);
+    if (cambio.anadida) {
+      if (estaba != -1) return;
+      // Arriba del todo, que es donde la pone YouTube Music: lo último que
+      // marcas es lo primero que ves.
+      pistas.insert(0, cambio.pista);
+      _recienAnadida = cambio.pista.videoId;
+    } else {
+      if (estaba == -1) return;
+      pistas.removeAt(estaba);
+      if (_recienAnadida == cambio.pista.videoId) _recienAnadida = null;
+    }
+    setState(() {
+      _coleccion = YtColeccion(
+        titulo: c.titulo,
+        subtitulo: c.subtitulo,
+        miniatura: c.miniatura,
+        pistas: pistas,
+      );
+    });
   }
 
   @override
@@ -58,6 +117,7 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
 
   @override
   void dispose() {
+    widget.favoritos.removeListener(_onFavoritosCambio);
     _sub?.cancel();
     _sub = null;
     super.dispose();
@@ -225,7 +285,7 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
             }
             final t = c.pistas[i - 1];
             final activa = t.videoId == sonando;
-            return ListTile(
+            final fila = ListTile(
               dense: true,
               selected: activa,
               leading: SizedBox(
@@ -255,6 +315,34 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
                       style: theme.textTheme.bodySmall
                           ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
               onTap: () => unawaited(_reproducirDesde(i - 1)),
+            );
+            if (t.videoId != _recienAnadida) return fila;
+            // La recién añadida entra creciendo desde altura cero y bajando
+            // un poco: al ocupar sitio empuja al resto hacia abajo sola, que
+            // es el efecto que se busca sin tener que animar las demás filas
+            // ni cambiar el `ListView.builder` por un `AnimatedList`.
+            return TweenAnimationBuilder<double>(
+              key: ValueKey('nueva-${t.videoId}'),
+              tween: Tween(begin: 0, end: 1),
+              duration: const Duration(milliseconds: 420),
+              curve: Curves.easeOutCubic,
+              onEnd: () {
+                if (mounted && _recienAnadida == t.videoId) {
+                  setState(() => _recienAnadida = null);
+                }
+              },
+              builder: (context, v, child) => Align(
+                alignment: Alignment.bottomCenter,
+                heightFactor: v,
+                child: Opacity(
+                  opacity: v,
+                  child: Transform.translate(
+                    offset: Offset(0, -16 * (1 - v)),
+                    child: child,
+                  ),
+                ),
+              ),
+              child: fila,
             );
           },
         );

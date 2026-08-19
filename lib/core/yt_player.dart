@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
+import 'app_config.dart' show AppConfig, rutaEfectivaDeCacheContinuaciones;
 import 'procesos.dart' show sufijoEjecutable;
 import 'yt_auth.dart';
 import 'yt_local_proxy.dart';
@@ -50,12 +51,18 @@ class YtPlayer extends ChangeNotifier {
   /// [auth] es opcional porque el resolutor funciona sin sesión (ver
   /// `YtStreamResolver.sesion`), y así los tests que solo comprueban la cola o
   /// la ausencia de libmpv no tienen que montar una. `main.dart` sí la pasa.
-  YtPlayer({YtAuth? auth, int volumenInicial = 60})
+  ///
+  /// [config] es el mismo objeto mutable que usa `Settings`: no hace falta
+  /// enterarse de cuándo cambia el límite de la caché de continuaciones, con
+  /// leerlo en el momento de podar (`_registrarContinuacion`) basta.
+  YtPlayer({YtAuth? auth, int volumenInicial = 60, AppConfig? config})
       // PRUEBA: sin las cookies de la cuenta, exactamente como yt-dlp. Ver
       // `YtStreamResolver.sesion`.
       : _stream = YtStreamResolver(),
         _volumen = ValueNotifier<int>(volumenInicial.clamp(0, 100)),
-        _mpv = libmpvDisponible ? Player() : null {
+        _mpv = libmpvDisponible ? Player() : null,
+        // ignore: prefer_initializing_formals
+        _config = config {
     final mpv = _mpv;
     if (mpv == null) {
       // Sin libmpv no hay reproductor, pero el objeto tiene que existir igual:
@@ -136,6 +143,13 @@ class YtPlayer extends ChangeNotifier {
   /// Quien resuelve las URLs por la vía rápida. yt-dlp se queda de plan B, más
   /// abajo.
   final YtStreamResolver _stream;
+
+  /// De aquí sale el límite de la caché de continuaciones
+  /// ([limiteCacheContinuacionesMB]). `null` en los tests, que no montan
+  /// ajustes — ahí se usa el valor por defecto de [AppConfig].
+  final AppConfig? _config;
+
+  int get _limiteCacheContinuacionesMB => _config?.limiteCacheContinuacionesMB ?? 300;
 
   /// Por dónde pasan todas las URLs de audio antes de llegar a libmpv. Ver
   /// `yt_local_proxy.dart` para el porqué: ffmpeg recibe `403` de googlevideo
@@ -464,6 +478,83 @@ class YtPlayer extends ChangeNotifier {
     return url;
   }
 
+  /// Cuánto se espera, tras abrir una pista, antes de lanzar la descarga
+  /// completa de repuesto. Ver [_iniciarContinuacionConRetraso].
+  static const _retrasoContinuacion = Duration(seconds: 4);
+
+  /// Lanza [_descargarCompletaConYtDlp] **solo si la pista sigue sonando**
+  /// unos segundos después de abrirse.
+  ///
+  /// Sin este retraso, saltar de canción deprisa (varias pulsaciones
+  /// seguidas antes de que suene ninguna) lanzaba un proceso de yt-dlp
+  /// —con resolución de retos de JavaScript incluida— por cada pista
+  /// tocada y descartada al momento: un puñado de peticiones automatizadas
+  /// y rápidas contra YouTube en pocos segundos, que es justo el patrón que
+  /// dispara su aviso de "confirma que no eres un robot". La descarga de
+  /// repuesto solo hace falta pasado el primer minuto largo, así que
+  /// esperar aquí no cuesta nada: sigue habiendo margen de sobra.
+  void _iniciarContinuacionConRetraso(String videoId) {
+    // 0 MB es "apagado": ni se descarga ni se guarda nada. Es una decisión
+    // del usuario en Ajustes, no un fallo — se respeta sin más.
+    if (_limiteCacheContinuacionesMB <= 0) return;
+    _continuaciones.putIfAbsent(videoId, () => _conseguirContinuacion(videoId));
+    // Aunque ya estuviera en marcha (o terminada) de antes, hay que volver a
+    // reflejarla en la barra: `_abrirActual` deja el progreso a `null` en
+    // cada cambio de pista, y sin esto una canción que **ya está descargada**
+    // se enseñaba como si no lo estuviera al volver a ella.
+    unawaited(_reflejarContinuacion(videoId));
+  }
+
+  /// La copia completa de [videoId]: la de disco si ya está —de esta sesión o
+  /// de cualquier otra anterior— y, si no, una descarga nueva.
+  ///
+  /// Mirar el disco antes de bajar nada es lo que hace que la caché sea una
+  /// caché de verdad y no un buffer de usar y tirar: sin esto, cerrar y
+  /// abrir la app volvía a descargar pistas que ya estaban enteras en la
+  /// carpeta, y encima gastaba una petición a YouTube por cada una.
+  Future<File?> _conseguirContinuacion(String videoId) async {
+    final yaEsta = await _continuacionEnDisco(videoId);
+    if (yaEsta != null) {
+      debugPrint('NeoTube: $videoId ya estaba en la caché de repuesto');
+      return yaEsta;
+    }
+    await Future<void>.delayed(_retrasoContinuacion);
+    if (actual?.videoId != videoId) return null;
+    return _descargarCompletaConYtDlp(videoId);
+  }
+
+  Future<File?> _continuacionEnDisco(String videoId) async {
+    try {
+      final f = File(p.join((await _dirDeContinuaciones()).path, '$videoId.audio'));
+      if (f.existsSync() && f.lengthSync() > 0) {
+        // Se le pone la fecha al día: la poda de `_registrarContinuacion` va
+        // por antigüedad, y sin esto una pista que se reescucha a menudo
+        // seguiría envejeciendo como si nadie la tocara y acabaría siendo la
+        // primera en caer.
+        try {
+          f.setLastModifiedSync(DateTime.now());
+        } catch (_) {
+          // Que no se pueda tocar la fecha no invalida el fichero.
+        }
+        return f;
+      }
+    } catch (_) {
+      // Carpeta inaccesible: se trata como "no está" y se vuelve a bajar.
+    }
+    return null;
+  }
+
+  /// Pinta en la barra el estado de la continuación de [videoId] cuando esté
+  /// resuelta. Si la pista ya no es la que suena, no toca nada.
+  Future<void> _reflejarContinuacion(String videoId) async {
+    final futuro = _continuaciones[videoId];
+    if (futuro == null) return;
+    final archivo = await futuro;
+    if (archivo != null && archivo.existsSync()) {
+      _fijarProgresoDescarga(videoId, 1);
+    }
+  }
+
   /// Descarga **la pista entera** a un fichero, para cuando la vía rápida
   /// (`ANDROID_VR`) se quede corta pasado el primer megabyte — ver
   /// `yt_local_proxy.dart` para el porqué del corte, y [_continuarTrasCorte]
@@ -494,54 +585,147 @@ class YtPlayer extends ChangeNotifier {
       destino.path,
       'https://www.youtube.com/watch?v=$videoId',
     ];
+    // `Process.start` y no `Process.run`: hace falta poder matar el proceso
+    // si algo va mal, y poder ir marcando el progreso mientras corre.
+    //
+    // ⚠️ Ese progreso **no sale de leer `stderr`.** yt-dlp sí imprime ahí un
+    // `[download]  42.0% of ...`, pero llega casi todo junto: un fichero de
+    // pocos MB se baja a decenas de MB/s en cuanto empieza, así que de 0% a
+    // 100% pasan milisegundos. Casi todo el tiempo real (los 5 s que exige
+    // el sitio antes de dejar descargar, más resolver la URL) transcurre
+    // **antes** de que aparezca ninguna línea de progreso — parsearlas
+    // daba una barra que estaba en 0% y saltaba a 100% de golpe.
+    //
+    // Lo que se pinta en su lugar es una estimación por tiempo transcurrido
+    // contra [_duracionTipicaDescarga] (la media de lo que tarda de
+    // verdad): avanza sola, a un ritmo constante, y nunca pasa de 0.95
+    // hasta que el proceso termina de verdad — así no hay manera de que la
+    // barra diga "lista" antes de que lo esté, ni de que se quede clavada
+    // en 100% mientras todavía se está descargando.
+    Process? proceso;
+    Timer? temporizadorProgreso;
+    final erroresDeSalida = StringBuffer();
     try {
-      final res = await Process.run(
-        bin.path,
-        args,
-        environment: {'PATH': _pathMinimo},
-      ).timeout(const Duration(seconds: 40));
-      if (res.exitCode != 0 || !destino.existsSync()) {
+      proceso = await Process.start(bin.path, args, environment: {'PATH': _pathMinimo});
+      unawaited(proceso.stdout.drain<void>());
+      unawaited(proceso.stderr.transform(systemEncoding.decoder).forEach(erroresDeSalida.write));
+      final reloj = Stopwatch()..start();
+      _fijarProgresoDescarga(videoId, 0);
+      temporizadorProgreso = Timer.periodic(const Duration(milliseconds: 150), (_) {
+        final fraccion =
+            reloj.elapsedMilliseconds / _duracionTipicaDescarga.inMilliseconds;
+        _fijarProgresoDescarga(videoId, fraccion.clamp(0.0, 0.95));
+      });
+      final codigo = await proceso.exitCode.timeout(const Duration(seconds: 40));
+      temporizadorProgreso.cancel();
+      if (codigo != 0 || !destino.existsSync()) {
+        // Sin copia de repuesto: no hay nada que enseñar como "a salvo".
+        _fijarProgresoDescarga(videoId, null);
         debugPrint('NeoTube: descarga completa de $videoId falló '
-            '(exit ${res.exitCode}): ${res.stderr}');
+            '(exit $codigo): $erroresDeSalida');
         return null;
       }
       debugPrint('NeoTube: descarga completa de $videoId lista '
           '(${destino.lengthSync()} bytes)');
-      _registrarContinuacion(destino);
+      // A 1.0 y ahí se queda: el tramo descargado se enseña el resto de la
+      // canción, no un instante — es justo la parte útil de saber que ya
+      // está a salvo si la vía rápida choca con el corte.
+      _fijarProgresoDescarga(videoId, 1.0);
+      unawaited(_registrarContinuacion(destino));
       return destino;
     } catch (e) {
+      temporizadorProgreso?.cancel();
+      _fijarProgresoDescarga(videoId, null);
+      proceso?.kill();
       debugPrint('NeoTube: descarga completa de $videoId lanzó: $e');
       return null;
     }
   }
 
-  Directory? _carpetaDeContinuaciones;
+  /// Lo que tarda de verdad `_descargarCompletaConYtDlp` en el caso típico:
+  /// ~5 s de espera obligatoria del sitio, más resolver la URL y el propio
+  /// vídeo. Es la referencia de [_fijarProgresoDescarga] para estimar el
+  /// avance por tiempo — ver el porqué ahí arriba.
+  static const _duracionTipicaDescarga = Duration(seconds: 9);
 
-  Future<Directory> _dirDeContinuaciones() async {
-    final actual = _carpetaDeContinuaciones;
-    if (actual != null) return actual;
-    final dir = Directory(p.join(Directory.systemTemp.path, 'neotube_continuaciones'));
-    if (!dir.existsSync()) dir.createSync(recursive: true);
-    return _carpetaDeContinuaciones = dir;
+  /// 0..1 según avanza la descarga de repuesto de la pista **que está
+  /// sonando ahora mismo**; se queda en `1.0` una vez lista (no desaparece:
+  /// es la señal de que esa parte de la canción ya está a salvo) y en `null`
+  /// si no hay ninguna en marcha o si falló. La pinta `_Progreso`
+  /// (`neotube_shell.dart`) como un tramo de la línea de tiempo más tenue
+  /// que lo ya escuchado: es la parte de la canción que ya está a salvo por
+  /// si la vía rápida choca con el corte.
+  double? progresoDescargaRepuesto;
+
+  void _fijarProgresoDescarga(String videoId, double? valor) {
+    if (actual?.videoId != videoId) return;
+    progresoDescargaRepuesto = valor;
+    notifyListeners();
   }
 
-  /// Los ficheros de [_descargarCompletaConYtDlp] que están vivos ahora
-  /// mismo, del más viejo al más nuevo. Cada pista de más de un minuto deja
-  /// uno, y son varios MB cada uno — sin límite, sería una fuga de disco en
-  /// una sesión de escucha larga. Se quedan solo los dos últimos: la pista
-  /// actual y la anterior, por si un salto hacia atrás la necesita todavía.
-  final List<File> _continuacionesGuardadas = [];
-  static const _maxContinuacionesGuardadas = 2;
-
-  void _registrarContinuacion(File f) {
-    _continuacionesGuardadas.add(f);
-    while (_continuacionesGuardadas.length > _maxContinuacionesGuardadas) {
-      final viejo = _continuacionesGuardadas.removeAt(0);
+  /// Cuelga de [cacheDir] (o de la ruta que haya elegido el usuario en
+  /// Ajustes, [AppConfig.rutaCacheContinuaciones]) y no de un temporal del
+  /// sistema operativo: son copias que se pueden borrar sin perder nada de
+  /// verdad (se vuelven a bajar si hacen falta), igual que `ArtCache`, así
+  /// que en Linux van a `~/.cache` y no a `~/.config` por defecto. Que sea
+  /// disco de verdad y no un temporal gestionado por el sistema es justo lo
+  /// que hace falta para que el límite de tamaño de Ajustes tenga sentido:
+  /// un temporal que Windows puede vaciar solo en cualquier momento no es
+  /// una caché que el usuario controle.
+  ///
+  /// No se memoriza: es barato (`existsSync`/`createSync` sobre una carpeta
+  /// que casi siempre ya existe) y así un cambio de ruta en Ajustes, en
+  /// caliente, se nota en la siguiente pista sin tener que reiniciar.
+  Future<Directory> _dirDeContinuaciones() async {
+    final elegida = _config?.rutaCacheContinuaciones;
+    if (elegida != null && elegida.trim().isNotEmpty) {
       try {
-        if (viejo.existsSync()) viejo.deleteSync();
-      } catch (_) {
-        // Se queda en disco hasta el próximo reinicio; no es grave.
+        final dir = Directory(rutaEfectivaDeCacheContinuaciones(elegida));
+        if (!dir.existsSync()) dir.createSync(recursive: true);
+        return dir;
+      } catch (e) {
+        // Ruta inválida, unidad desconectada, sin permiso… Se cae a la de
+        // por defecto en vez de perder la descarga de repuesto de la pista.
+        debugPrint('NeoTube: no se pudo usar la carpeta de caché elegida '
+            '($elegida): $e. Usando la de por defecto.');
       }
+    }
+    final dir = Directory(rutaEfectivaDeCacheContinuaciones(null));
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    return dir;
+  }
+
+  /// Poda la caché de continuaciones al tamaño que fije
+  /// [limiteCacheContinuacionesMB] en Ajustes, borrando lo más antiguo hasta
+  /// bajar del tope — mismo criterio que `ArtCache.prune()`. Se llama cada
+  /// vez que se guarda una nueva, no en un temporizador aparte: son pocos
+  /// ficheros (uno por pista de más de un minuto) y listarlos no cuesta nada.
+  Future<void> _registrarContinuacion(File nuevo) async {
+    final limiteBytes = _limiteCacheContinuacionesMB * 1024 * 1024;
+    try {
+      final dir = await _dirDeContinuaciones();
+      final ficheros = await dir.list().where((e) => e is File).cast<File>().toList();
+      final stats = <File, FileStat>{};
+      var total = 0;
+      for (final f in ficheros) {
+        final s = await f.stat();
+        stats[f] = s;
+        total += s.size;
+      }
+      if (total <= limiteBytes) return;
+
+      ficheros.sort((a, b) => stats[a]!.modified.compareTo(stats[b]!.modified));
+      for (final f in ficheros) {
+        if (total <= limiteBytes) break;
+        // El que se acaba de bajar no se borra a sí mismo aunque el límite
+        // sea menor que su propio tamaño: sin él, la pista que suena ahora
+        // se queda sin la copia de repuesto que la trajo aquí.
+        if (f.path == nuevo.path) continue;
+        total -= stats[f]!.size;
+        await f.delete().catchError((_) => f);
+      }
+    } catch (_) {
+      // Podar es best-effort; que falle no debe tocar la reproducción.
     }
   }
 
@@ -662,13 +846,37 @@ class YtPlayer extends ChangeNotifier {
     final reloj = Stopwatch()..start();
     try {
       await alEmpezarAReproducir?.call();
+      _pistaConCorte = null;
+      progresoDescargaRepuesto = null;
+
+      // Si la copia completa ya está en la caché, se toca **de disco**: es
+      // instantáneo, no gasta red, y se salta de paso el corte del minuto y
+      // el parón de reabrir que conlleva. Antes no se miraba aquí y una
+      // canción ya descargada volvía a resolverse y a bajarse en streaming
+      // igual que si fuera nueva — la caché solo entraba al chocar con el
+      // corte, que es justo cuando ya es tarde para evitar el salto.
+      final enCache = _limiteCacheContinuacionesMB > 0
+          ? await _continuacionEnDisco(t.videoId)
+          : null;
+      if (enCache != null) {
+        debugPrint('NeoTube: ${t.videoId} sale de la caché en '
+            '${reloj.elapsedMilliseconds}ms (sin red)');
+        _continuaciones[t.videoId] = Future<File?>.value(enCache);
+        await mpv.open(Media(enCache.path));
+        _fijarProgresoDescarga(t.videoId, 1);
+        _adelantarSiguiente();
+        _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
+          if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
+        });
+        return;
+      }
+
       final url = await _resolverUrl(t.videoId);
       // Una línea por cambio de pista, con el número que justifica todo este
       // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
       // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
       debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
-      _pistaConCorte = null;
-      _continuaciones.putIfAbsent(t.videoId, () => _descargarCompletaConYtDlp(t.videoId));
+      _iniciarContinuacionConRetraso(t.videoId);
       final urlLocal = await _proxy.exponer(
         url,
         onCorte: () => _pistaConCorte = t.videoId,
@@ -723,7 +931,7 @@ class YtPlayer extends ChangeNotifier {
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
       if (actual?.videoId != t.videoId) return;
-      _continuaciones.putIfAbsent(t.videoId, () => _descargarCompletaConYtDlp(t.videoId));
+      _iniciarContinuacionConRetraso(t.videoId);
       final urlLocal = await _proxy.exponer(
         urlFresca,
         onCorte: () => _pistaConCorte = t.videoId,
@@ -787,9 +995,19 @@ class YtPlayer extends ChangeNotifier {
   /// la de canciones de Spotify y esta solo tiene la que suena ahora.
   Future<void> Function()? alAcabarLaCola;
 
+  Timer? _temporizadorReintentoSalto;
+
   /// Salta a la siguiente. Cuando lo pide la cola sola ([automatico]) y la
   /// pista falla, se sigue bajando en vez de parar: un vídeo bloqueado por
   /// región en mitad de una playlist de 300 no debe terminar la escucha.
+  ///
+  /// Un salto manual que falla (el caso típico: YouTube pide confirmar que
+  /// no eres un robot tras varios saltos seguidos) **no se rinde ni corta lo
+  /// que suena**: `_abrirActual` nunca llega a tocar `mpv` si la resolución
+  /// falla —la pista de antes sigue sonando de por sí—, así que solo hace
+  /// falta deshacer el `indice++` (para que la interfaz no se quede
+  /// marcando como "actual" una pista que en realidad no suena) y reintentar
+  /// sola a los 4 s, sin que el usuario tenga que volver a pulsar.
   Future<void> siguiente({bool automatico = false}) async {
     final mpv = _mpv;
     if (mpv == null) return;
@@ -805,17 +1023,29 @@ class YtPlayer extends ChangeNotifier {
       await mpv.seek(Duration.zero);
       return;
     }
+    _temporizadorReintentoSalto?.cancel();
+    final indiceAnterior = indice;
     indice++;
     try {
       await _abrirActual();
     } catch (_) {
-      if (automatico && puedeSaltar) await siguiente(automatico: true);
+      if (automatico && puedeSaltar) {
+        await siguiente(automatico: true);
+        return;
+      }
+      indice = indiceAnterior;
+      error = null;
+      notifyListeners();
+      _temporizadorReintentoSalto = Timer(const Duration(seconds: 4), () {
+        unawaited(siguiente());
+      });
     }
   }
 
   Future<void> anterior() async {
     final mpv = _mpv;
     if (mpv == null) return;
+    _temporizadorReintentoSalto?.cancel();
     // Igual que en NeoFy: pasados 3 s, "anterior" reinicia la canción.
     if (mpv.state.position.inSeconds > 3 || indice <= 0) {
       await mpv.seek(Duration.zero);
@@ -829,6 +1059,7 @@ class YtPlayer extends ChangeNotifier {
   /// reproducción, o pulsar una fila de una playlist ya sonando).
   Future<void> saltarA(int i) async {
     if (i < 0 || i >= cola.length) return;
+    _temporizadorReintentoSalto?.cancel();
     indice = i;
     await _abrirActual();
   }
@@ -887,6 +1118,7 @@ class YtPlayer extends ChangeNotifier {
 
   Future<void> stop() async {
     _temporizadorAbriendo?.cancel();
+    _temporizadorReintentoSalto?.cancel();
     _pistaAbriendo = null;
     _reintentosHechos = 0;
     _pistaConCorte = null;
@@ -902,6 +1134,7 @@ class YtPlayer extends ChangeNotifier {
   @override
   void dispose() {
     _temporizadorAbriendo?.cancel();
+    _temporizadorReintentoSalto?.cancel();
     unawaited(_subCompletado?.cancel());
     unawaited(_subError?.cancel());
     unawaited(_subDuracion?.cancel());

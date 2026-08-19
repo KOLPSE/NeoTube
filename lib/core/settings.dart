@@ -44,6 +44,11 @@ class Settings extends ChangeNotifier {
   bool get performanceMode => modoRendimiento.value;
   bool get discordRpcEnabled => config.discordRpcEnabled;
   String get discordClientId => config.discordClientId;
+  int get limiteCacheContinuacionesMB => config.limiteCacheContinuacionesMB;
+
+  /// Ruta absoluta elegida a mano, o `null` si se usa la de por defecto
+  /// (`cacheDir()/continuaciones`).
+  String? get rutaCacheContinuaciones => config.rutaCacheContinuaciones;
 
   Future<void> setPerformanceMode(bool activo) async {
     if (modoRendimiento.value == activo) return;
@@ -67,6 +72,27 @@ class Settings extends ChangeNotifier {
     if (config.discordClientId == recortado) return;
     config.discordClientId = recortado;
     onCambioDiscord?.call(config.discordRpcEnabled, recortado);
+    notifyListeners();
+    await config.save();
+  }
+
+  Future<void> setLimiteCacheContinuaciones(int mb) async {
+    final acotado = mb.clamp(0, 100000);
+    if (config.limiteCacheContinuacionesMB == acotado) return;
+    config.limiteCacheContinuacionesMB = acotado;
+    notifyListeners();
+    await config.save();
+  }
+
+  /// Cambia dónde vive la caché de descargas de repuesto. `null` o cadena
+  /// vacía vuelve al valor por defecto. No se comprueba que la carpeta
+  /// exista ni que se pueda escribir en ella aquí —eso lo hace
+  /// `YtPlayer._dirDeContinuaciones` al usarla, que es cuando de verdad
+  /// hace falta, y si falla cae sola a la ruta por defecto.
+  Future<void> setRutaCacheContinuaciones(String? ruta) async {
+    final limpia = (ruta == null || ruta.trim().isEmpty) ? null : ruta.trim();
+    if (config.rutaCacheContinuaciones == limpia) return;
+    config.rutaCacheContinuaciones = limpia;
     notifyListeners();
     await config.save();
   }

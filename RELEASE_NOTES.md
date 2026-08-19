@@ -1,26 +1,30 @@
-## Reproducción: arreglado el corte a mitad de canción
+## Me gusta
 
-Cualquier canción de más de un minuto largo se cortaba y saltaba sola a la siguiente. La causa
-no tenía nada que ver con identidades de sesión ni con reintentos: **YouTube deja de servir el
-audio de esta app pasado 1.000.000 de bytes exactos** (un límite nuevo, del protocolo de
-streaming con el que está sustituyendo la descarga progresiva de toda la vida — hasta el propio
-`yt-dlp`, con su cliente habitual, tropieza con el mismo muro).
+Botón de corazón a la derecha del nombre de la canción, en la barra de abajo.
+Lo que marques va a tu lista **Música que me gusta** de YouTube Music — la misma
+que ves en la app oficial y en Biblioteca, no una lista aparte de NeoTube.
 
-La solución: en cuanto empieza a sonar una canción, NeoTube ya está bajando en segundo plano una
-copia completa por otra vía. Si la vía rápida choca con el corte, la app **retoma exactamente
-donde iba** con esa copia — se nota un parón de bien menos de un segundo en ese punto, pero la
-canción sigue en vez de saltar. Esas copias no se acumulan: solo se guardan las dos últimas y se
-borran solas.
+Si estás dentro de esa lista cuando das al corazón, la canción entra arriba del
+todo con una animación, sin tener que salir y volver a entrar. Al quitar el like,
+desaparece igual.
 
-## Reintento más persistente
+## Caché de reproducción
 
-Si una pista aun así no arranca a la primera, se reintenta hasta dos veces (antes, una) antes de
-rendirse, y el error que se enseña viene traducido y resumido en vez del volcado en inglés de
-yt-dlp.
+Las copias que NeoTube baja de fondo para que la reproducción no se corte ahora
+son una caché de verdad:
 
-## Deno viaja empaquetado
+- **Una canción ya descargada suena directamente desde el disco.** Arranca al
+  instante, sin gastar red, y sin el micro-corte que había pasado el primer
+  minuto. Antes la copia solo se usaba justo al llegar a ese corte, así que una
+  canción ya guardada se volvía a bajar entera igualmente.
+- **Sobrevive a cerrar la app.** Antes el índice vivía solo en memoria y al
+  reabrir se volvía a descargar todo lo que ya estaba en disco.
+- **Se puede configurar en Ajustes:** cuánto puede ocupar (hasta 100 GB, o 0 para
+  apagarla), en qué carpeta se guarda, cuánto lleva usado, y un botón para
+  vaciarla. La ruta se ve siempre, aunque uses la de por defecto.
 
-El plan B de yt-dlp necesita un runtime de JavaScript para descifrar firmas; sin él caía a una
-extracción más frágil que era la que disparaba los avisos de "confirma que no eres un bot".
-Ahora Deno va dentro del instalador y del paquete de Arch, así que ese plan B no depende de
-tenerlo ya instalado en el sistema.
+## Barra de progreso
+
+La parte ya escuchada de la canción se pinta en rojo y la que está descargada en
+gris, para distinguirlas de un vistazo. La franja de la descarga avanza mientras
+baja en vez de aparecer de golpe al terminar.

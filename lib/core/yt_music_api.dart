@@ -1029,6 +1029,22 @@ class YtMusicApi {
     }
   }
 
+  // ------------------------------------------------------------------ likes
+
+  /// Marca la canción como favorita en la cuenta.
+  ///
+  /// No hay endpoint propio de "añadir a favoritos": en YouTube Music, la
+  /// lista **Me gusta** (`FEmusic_liked_videos`, la que ya se enseña en
+  /// Biblioteca) no es una playlist que se edite pista a pista, sino el
+  /// reflejo de los "me gusta" de la cuenta. Darle like a un vídeo lo mete
+  /// ahí solo, que es justo lo que hace el botón del cliente oficial.
+  Future<void> darLike(String videoId) =>
+      _postBytes('like/like', {'target': {'videoId': videoId}});
+
+  /// Deshace [darLike] y, con ello, saca la canción de la lista de favoritos.
+  Future<void> quitarLike(String videoId) =>
+      _postBytes('like/removelike', {'target': {'videoId': videoId}});
+
   // -------------------------------------------------------------- navegación
 
   static List _bloquesDeSecciones(dynamic j) {
