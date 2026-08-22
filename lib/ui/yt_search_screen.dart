@@ -52,6 +52,14 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
   bool _buscando = false;
   String? _error;
   bool _buscadoAlgunaVez = false;
+  YtFiltroBusqueda _filtro = YtFiltroBusqueda.todo;
+
+  /// La consulta con la que se pintó lo que hay ahora en pantalla.
+  ///
+  /// Cambiar de filtro tiene que repetir **esa** búsqueda, no lo que haya
+  /// escrito en la caja: si el usuario dejó el cursor a medio escribir otra
+  /// cosa, pulsar un chip buscaría una palabra incompleta que nunca pidió.
+  String _consultaEnPantalla = '';
 
   @override
   void dispose() {
@@ -73,16 +81,24 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
     return list;
   }
 
-  Future<void> _buscar() async {
-    final query = _ctrl.text.trim();
+  /// Cambia de categoría y repite la búsqueda que hay en pantalla.
+  void _cambiarFiltro(YtFiltroBusqueda f) {
+    if (f == _filtro) return;
+    setState(() => _filtro = f);
+    if (_consultaEnPantalla.isNotEmpty) unawaited(_buscar(_consultaEnPantalla));
+  }
+
+  Future<void> _buscar([String? consulta]) async {
+    final query = (consulta ?? _ctrl.text).trim();
     if (query.isEmpty) return;
     setState(() {
       _buscando = true;
       _error = null;
       _buscadoAlgunaVez = true;
+      _consultaEnPantalla = query;
     });
     try {
-      final r = await widget.api.buscar(query);
+      final r = await widget.api.buscar(query, filtro: _filtro);
       if (!mounted) return;
       setState(() => _elementos = _aplanarResultados(r));
     } catch (e) {
@@ -122,6 +138,28 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
                   : null,
             ),
             onSubmitted: (_) => unawaited(_buscar()),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              for (final f in YtFiltroBusqueda.values)
+                ChoiceChip(
+                  label: Text(f.etiqueta),
+                  selected: _filtro == f,
+                  // Deshabilitados mientras se busca: pulsar tres chips
+                  // seguidos lanzaría tres búsquedas y pintaría la que
+                  // conteste antes, que no tiene por qué ser la última pulsada.
+                  onSelected: _buscando
+                      ? null
+                      : (elegido) {
+                          if (elegido) _cambiarFiltro(f);
+                        },
+                ),
+            ],
           ),
         ),
         if (_error != null)

@@ -18,6 +18,10 @@ class YtCache {
   static const ttlExplorar = Duration(hours: 6);
   static const ttlBiblioteca = Duration(minutes: 10);
   static const ttlColeccion = Duration(hours: 24);
+
+  /// Una página de artista cambia poco (su discografía, sus más escuchadas),
+  /// pero no es inmutable como un álbum: una hora.
+  static const ttlArtista = Duration(hours: 1);
   static const ttlBuscar = Duration(minutes: 10);
   static const ttlPorDefecto = Duration(minutes: 10);
 
@@ -30,6 +34,7 @@ class YtCache {
       return ttlBiblioteca;
     }
     if (clave.startsWith('coleccion:')) return ttlColeccion;
+    if (clave.startsWith('artista:')) return ttlArtista;
     if (clave.startsWith('buscar:')) return ttlBuscar;
     return ttlPorDefecto;
   }

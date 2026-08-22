@@ -21,6 +21,7 @@ import 'core/yt_auth.dart';
 import 'core/yt_models.dart';
 import 'core/yt_music_api.dart';
 import 'core/yt_player.dart';
+import 'core/yt_sesion.dart';
 import 'ui/atajos.dart';
 import 'ui/neotube_shell.dart';
 
@@ -93,16 +94,28 @@ Future<void> main(List<String> args) async {
   final auth = YtAuth();
   await auth.loadStored();
 
-  runApp(NeoTubeApp(config: config, auth: auth));
+  // La cola de la vez pasada, si la hay. Se lee aquí, antes de `runApp`, por
+  // lo mismo que las cookies: llega a la interfaz con el primer frame, y no
+  // como un cambio a los dos segundos que hace bailar la barra de abajo.
+  // **Esto no reproduce nada** — ver `SesionDeReproduccion`.
+  final sesion = await SesionDeReproduccion.cargar();
+
+  runApp(NeoTubeApp(config: config, auth: auth, sesion: sesion));
 }
 
 const _seedNeoTube = Color(0xFFE53935);
 
 class NeoTubeApp extends StatelessWidget {
-  const NeoTubeApp({super.key, required this.config, required this.auth});
+  const NeoTubeApp({
+    super.key,
+    required this.config,
+    required this.auth,
+    this.sesion,
+  });
 
   final AppConfig config;
   final YtAuth auth;
+  final SesionDeReproduccion? sesion;
 
   @override
   Widget build(BuildContext context) {
@@ -121,16 +134,46 @@ class NeoTubeApp extends StatelessWidget {
         useMaterial3: true,
       ),
       themeMode: ThemeMode.system,
-      home: _NeoTubeRoot(config: config, auth: auth),
+      // ⚠️ **Esto es lo que evita que la app se cierre sola al maximizar.**
+      //
+      // El puente de accesibilidad de Windows de Flutter no consigue construir
+      // el árbol de esta app: el log se llena de
+      // `Failed to update ui::AXTree, error: Nodes left pending by the update:
+      // 5 6 7 … 20` desde el primer frame. Con el árbol en ese estado, en
+      // cuanto Windows pide un evento de accesibilidad —y maximizar la ventana
+      // pide varios— el motor lo despacha sobre nodos que no existen y revienta
+      // con una **violación de acceso dentro de `flutter_windows.dll`**.
+      //
+      // Lo difícil de este fallo es que no deja rastro en Dart: ni excepción,
+      // ni stack, ni una línea en el log. La app simplemente desaparece. Se
+      // localizó por el visor de eventos de Windows (`Application Error`,
+      // `0xc0000005`, módulo `flutter_windows.dll`) y se confirmó maximizando
+      // la ventana por código con y sin este `ExcludeSemantics`: sin él muere
+      // siempre, con él sobrevive.
+      //
+      // **No se pierde accesibilidad real por el camino**, y por eso se acepta:
+      // el árbol nunca llegaba a construirse, así que un lector de pantalla ya
+      // no recibía nada antes de este cambio. Lo que se pierde es un árbol roto
+      // que además mataba la app. Viene de antes de tocar nada — la 1.0.0
+      // publicada se cierra igual —, así que no es una regresión de la interfaz
+      // nueva.
+      //
+      // Si algún día se quiere accesibilidad de verdad, esto **no** es el sitio
+      // donde arreglarlo: hay que encontrar qué widget deja nodos colgando y
+      // corregir ese árbol, y solo entonces quitar esta línea.
+      home: ExcludeSemantics(
+        child: _NeoTubeRoot(config: config, auth: auth, sesion: sesion),
+      ),
     );
   }
 }
 
 class _NeoTubeRoot extends StatefulWidget {
-  const _NeoTubeRoot({required this.config, required this.auth});
+  const _NeoTubeRoot({required this.config, required this.auth, this.sesion});
 
   final AppConfig config;
   final YtAuth auth;
+  final SesionDeReproduccion? sesion;
 
   @override
   State<_NeoTubeRoot> createState() => _NeoTubeRootState();
@@ -270,7 +313,46 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     _player.alEmpezarAReproducir = null;
     _ram.start();
     unawaited(_setupTray());
+
+    final sesion = widget.sesion;
+    if (sesion != null) {
+      _player.restaurar(
+        pistas: sesion.cola,
+        indice: sesion.indice,
+        posicion: sesion.posicion,
+        contexto: sesion.contexto,
+        aleatorio: sesion.aleatorio,
+        repeticion: sesion.repeticion,
+      );
+      _ultimoVideoIdGuardado = _player.actual?.videoId;
+    }
+    _player.addListener(_alCambiarLaPista);
+    // Un guardado periódico además del de cada cambio de pista: lo que cambia
+    // sin avisar es **la posición**, y es justo lo que hace falta para volver
+    // por donde ibas si la app se cierra de malas maneras. Cada 20 s cuesta un
+    // fichero pequeño y evita perder media canción.
+    _guardadoPeriodico = Timer.periodic(
+      const Duration(seconds: 20),
+      (_) => unawaited(_guardarSesion()),
+    );
   }
+
+  // -------------------------------------------------- sesión de reproducción
+
+  Timer? _guardadoPeriodico;
+  String? _ultimoVideoIdGuardado;
+
+  /// Guarda en cuanto cambia la canción, no solo al cerrar: un cierre por la
+  /// bandeja pasa por `_quit`, pero un cuelgue o un apagón no pasan por
+  /// ningún sitio.
+  void _alCambiarLaPista() {
+    final id = _player.actual?.videoId;
+    if (id == _ultimoVideoIdGuardado) return;
+    _ultimoVideoIdGuardado = id;
+    unawaited(_guardarSesion());
+  }
+
+  Future<void> _guardarSesion() => SesionDeReproduccion.guardarDe(_player);
 
   Future<void> _logout() async {
     await _player.stop();
@@ -279,6 +361,12 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
   }
 
   Future<void> _quit() async {
+    // ⚠️ **Antes de `stop()`**, que vacía la cola: guardarla después es
+    // guardar que no había nada sonando, y el arranque siguiente no tendría
+    // dónde volver.
+    _guardadoPeriodico?.cancel();
+    _guardadoPeriodico = null;
+    await _guardarSesion();
     await _player.stop();
     await _discordRpc.stop();
     await _mpris.stop();
@@ -385,7 +473,9 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     windowManager.removeListener(this);
     trayManager.removeListener(this);
     _mediaKeys.stop();
+    _guardadoPeriodico?.cancel();
     _player.removeListener(_avisarAlSistema);
+    _player.removeListener(_alCambiarLaPista);
     _player.onSalto = null;
     unawaited(_subSonando?.cancel());
     unawaited(_mpris.stop());

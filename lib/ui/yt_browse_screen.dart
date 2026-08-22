@@ -42,19 +42,19 @@ class YtBrowseScreen extends StatefulWidget {
 
 /// Medidas de la tarjeta. Sueltas y no dentro del widget porque el alto de la
 /// tira hay que calcularlo fuera, igual que en `home_screen.dart`.
-const double _ladoTarjeta = 132;
-const double _margenTarjeta = 4;
-const double _huecoTarjeta = 6;
+const double ladoDeTarjeta = 132;
+const double margenDeTarjeta = 4;
+const double huecoDeTarjeta = 6;
 
 /// Alto exacto que necesita una tira: carátula, hueco y las líneas de texto,
 /// **escaladas como las escale el sistema**. A ojo se corta en cuanto alguien
 /// tiene el tamaño de letra subido.
-double _altoDeTira(BuildContext context, TextStyle estilo, int lineas) {
+double altoDeTiraDeTarjetas(BuildContext context, TextStyle estilo, int lineas) {
   final tamano = MediaQuery.textScalerOf(context).scale(estilo.fontSize ?? 14);
   final altoDeLinea = tamano * (estilo.height ?? 1.4);
-  return _margenTarjeta * 2 +
-      _ladoTarjeta +
-      _huecoTarjeta +
+  return margenDeTarjeta * 2 +
+      ladoDeTarjeta +
+      huecoDeTarjeta +
       (altoDeLinea * lineas).ceilToDouble();
 }
 
@@ -107,7 +107,7 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
         // Tres líneas: título y hasta dos de subtítulo ("Lista • 42
         // canciones" se parte con frecuencia).
         final estilo = theme.textTheme.bodySmall ?? const TextStyle(fontSize: 12);
-        final alto = _altoDeTira(context, estilo, 3);
+        final alto = altoDeTiraDeTarjetas(context, estilo, 3);
         return ListView.builder(
           key: PageStorageKey(widget.store),
           padding: const EdgeInsets.symmetric(vertical: 24),
@@ -127,7 +127,7 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                 ],
                 TiraHorizontal(
                   alto: alto,
-                  centroDeFlechas: _margenTarjeta + _ladoTarjeta / 2,
+                  centroDeFlechas: margenDeTarjeta + ladoDeTarjeta / 2,
                   itemCount: seccion.items.length,
                   itemBuilder: (context, i) {
                     final item = seccion.items[i];
@@ -227,7 +227,7 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
     final item = widget.item;
     // Los artistas los pinta redondos el cliente oficial, y la forma es la
     // pista más rápida para saber que eso no es un disco.
-    final radio = item.tipo == YtTipo.artista ? _ladoTarjeta / 2 : 8.0;
+    final radio = item.tipo == YtTipo.artista ? ladoDeTarjeta / 2 : 8.0;
     final abrible = widget.onReproducir != null;
 
     return MouseRegion(
@@ -240,16 +240,16 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
           onTap: widget.onTap,
           borderRadius: BorderRadius.circular(8),
           child: Padding(
-            padding: const EdgeInsets.all(_margenTarjeta),
+            padding: const EdgeInsets.all(margenDeTarjeta),
             child: SizedBox(
-              width: _ladoTarjeta,
+              width: ladoDeTarjeta,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Stack(
                     children: [
-                      ArtImage(url: item.miniatura, size: _ladoTarjeta, radius: radio),
+                      ArtImage(url: item.miniatura, size: ladoDeTarjeta, radius: radio),
                       if (widget.cargando)
                         Positioned.fill(
                           child: Center(
@@ -304,7 +304,7 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
                         ),
                     ],
                   ),
-                  const SizedBox(height: _huecoTarjeta),
+                  const SizedBox(height: huecoDeTarjeta),
                   Text(
                     item.titulo,
                     maxLines: 1,

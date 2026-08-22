@@ -19,6 +19,42 @@ class YtApiException implements Exception {
 
 const int _umbralIsolate = 192 * 1024;
 
+/// Lo que devuelve `_parseCabecera`: los cuatro datos de la cabecera de una
+/// lista o un álbum, más si está guardada en la biblioteca.
+typedef _Cabecera = ({
+  String titulo,
+  String subtitulo,
+  String? miniatura,
+  String? idParaGuardar,
+  bool? guardada,
+});
+
+/// Las categorías con las que se puede acotar una búsqueda.
+///
+/// Los `params` son las cadenas que manda el propio cliente web al pulsar cada
+/// chip de "Canciones / Álbumes / Artistas / Listas". Son **opacas**: un
+/// protobuf serializado y urlencodeado, no algo que se pueda construir. Están
+/// aquí copiadas y **comprobadas una a una contra la cuenta real** — cada una
+/// devuelve un único `musicShelfRenderer` con el título de su categoría.
+///
+/// ⚠️ El filtro de listas devuelve «Listas de la comunidad», que es lo que
+/// enseña también el cliente oficial: las listas destacadas de YouTube Music
+/// viven en otro `params` distinto y con este no salen.
+enum YtFiltroBusqueda {
+  todo('Todo', null),
+  canciones('Canciones', 'EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D'),
+  albumes('Álbumes', 'EgWKAQIYAWoKEAkQChAFEAMQBA%3D%3D'),
+  artistas('Artistas', 'EgWKAQIgAWoKEAkQChAFEAMQBA%3D%3D'),
+  listas('Listas', 'EgWKAQIoAWoKEAkQChAFEAMQBA%3D%3D');
+
+  const YtFiltroBusqueda(this.etiqueta, this.params);
+
+  final String etiqueta;
+
+  /// `null` solo en [todo], que es la búsqueda sin acotar.
+  final String? params;
+}
+
 List<YtSection> _decodeAndParseBuscar(Uint8List bytesGeneral, [Uint8List? bytesSongs]) {
   final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytesGeneral);
   dynamic jSongs;
@@ -50,6 +86,11 @@ List<YtSection> _decodeAndParseBuscar(Uint8List bytesGeneral, [Uint8List? bytesS
 (List<YtTrack>, String?) _decodeAndParseContinuacion(Uint8List bytes) {
   final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytes);
   return YtMusicApi._continuacionDeRespuestaStatic(j);
+}
+
+YtArtista _decodeAndParseArtista(Uint8List bytes) {
+  final dynamic j = const Utf8Decoder().fuse(const JsonDecoder()).convert(bytes);
+  return YtMusicApi._artistaDeRespuestaStatic(j);
 }
 
 YtColeccion _decodeAndParseCola(Uint8List bytes) {
@@ -194,13 +235,34 @@ class YtMusicApi {
   /// Busca y devuelve los resultados **por categorías** (canciones, listas,
   /// álbumes, artistas), combinando la búsqueda filtrada por canciones con la
   /// vista general por categorías para ofrecer un listado amplio de canciones.
-  Future<List<YtSection>> buscar(String query, {bool forzar = false}) async {
+  ///
+  /// Con [filtro] distinto de [YtFiltroBusqueda.todo] se le pide a la API una
+  /// sola categoría y se devuelve tal cual: ahí no hay nada que combinar ni
+  /// que deduplicar, y mezclarlo con la vista general devolvería justo lo que
+  /// el usuario acaba de decir que no quiere ver.
+  Future<List<YtSection>> buscar(
+    String query, {
+    bool forzar = false,
+    YtFiltroBusqueda filtro = YtFiltroBusqueda.todo,
+  }) async {
     final queryLimpia = query.trim();
     if (queryLimpia.isEmpty) return const [];
-    final clave = 'buscar:${queryLimpia.toLowerCase()}';
+    final clave = 'buscar:${filtro.name}:${queryLimpia.toLowerCase()}';
     if (!forzar) {
       final cached = cache.get<List<YtSection>>(clave);
       if (cached != null) return cached;
+    }
+
+    if (filtro != YtFiltroBusqueda.todo) {
+      final bytes = await _postBytes('search', {
+        'query': queryLimpia,
+        'params': filtro.params!,
+      });
+      final secciones = bytes.length >= _umbralIsolate
+          ? await Isolate.run(() => _decodeAndParseBuscar(bytes))
+          : _decodeAndParseBuscar(bytes);
+      if (secciones.isNotEmpty) cache.set(clave, secciones);
+      return secciones;
     }
 
     final respuestas = await Future.wait([
@@ -280,6 +342,82 @@ class YtMusicApi {
       cache.set(clave, secciones);
     }
     return secciones;
+  }
+
+  // ------------------------------------------------------------------ artista
+
+  /// La página de un artista: su cabecera y sus secciones.
+  ///
+  /// El `browseId` puede llegar de dos sitios con dos formas distintas — el
+  /// `UC…` que traen la búsqueda y los carruseles, y el `MPLAUC…` de la
+  /// pestaña "Tus artistas" —, y [browseIdDeArtista] los reduce al primero,
+  /// que es el que devuelve la página completa. Si ese viaje falla se
+  /// reintenta con el id tal cual vino: es mejor enseñar solo lo que hay en la
+  /// biblioteca que no enseñar nada.
+  Future<YtArtista> artista(String browseId, {bool forzar = false}) async {
+    final clave = 'artista:$browseId';
+    if (!forzar) {
+      final cached = cache.get<YtArtista>(clave);
+      if (cached != null) return cached;
+    }
+
+    final canonico = browseIdDeArtista(browseId);
+    Uint8List bytes;
+    try {
+      bytes = await _postBytes('browse', {'browseId': canonico});
+    } catch (e) {
+      if (canonico == browseId) rethrow;
+      debugPrint('[NeoTube artista] $canonico falló ($e); probando $browseId');
+      bytes = await _postBytes('browse', {'browseId': browseId});
+    }
+
+    final a = bytes.length >= _umbralIsolate
+        ? await Isolate.run(() => _decodeAndParseArtista(bytes))
+        : _decodeAndParseArtista(bytes);
+
+    if (a.secciones.isNotEmpty) cache.set(clave, a);
+    return a;
+  }
+
+  @visibleForTesting
+  static YtArtista artistaDeRespuesta(dynamic j) => _artistaDeRespuestaStatic(j);
+
+  static YtArtista _artistaDeRespuestaStatic(dynamic j) {
+    final secciones = _seccionesDeRespuestaStatic(j);
+
+    // Dos cabeceras posibles: `musicImmersiveHeaderRenderer` en la página
+    // pública (banner apaisado, oyentes, botones de aleatorio y mix) y
+    // `musicHeaderRenderer` en la vista de biblioteca (`MPLAUC…`), que es
+    // solo un título. Se prueban las dos y se acepta la que traiga nombre.
+    Map? h;
+    try {
+      h = _valorDeRenderer(j['header']);
+    } catch (_) {}
+
+    final nombre = _runsToText(h?['title']?['runs']) ?? '';
+    final suscriptores = _runsToText(h?['subscriptionButton']
+            ?['subscribeButtonRenderer']?['subscriberCountText']?['runs']) ??
+        '';
+    final oyentes = _runsToText(h?['monthlyListenerCount']?['runs']) ?? '';
+
+    return YtArtista(
+      nombre: nombre,
+      secciones: secciones,
+      miniatura: h == null ? null : _urlDeMiniatura(h['thumbnail']),
+      subtitulo: [oyentes, suscriptores].where((s) => s.isNotEmpty).join(' • '),
+      descripcion: h == null ? null : _runsCompletos(h['description']?['runs']),
+      playlistAleatorio: _playlistDeBoton(h?['playButton']),
+      playlistRadio: _playlistDeBoton(h?['startRadioButton']),
+    );
+  }
+
+  static String? _playlistDeBoton(dynamic boton) {
+    try {
+      return boton['buttonRenderer']['navigationEndpoint']['watchEndpoint']
+          ['playlistId'] as String?;
+    } catch (_) {
+      return null;
+    }
   }
 
   @visibleForTesting
@@ -841,25 +979,22 @@ class YtMusicApi {
         : _decodeAndParseColeccion(bytes);
 
     final pistas = [...coleccion.pistas];
-    var cActual = YtColeccion(
-      titulo: coleccion.titulo,
-      subtitulo: coleccion.subtitulo,
-      miniatura: coleccion.miniatura,
-      pistas: pistas,
-    );
-    yield cActual;
+    YtColeccion conPistas(List<YtTrack> p) => YtColeccion(
+          titulo: coleccion.titulo,
+          subtitulo: coleccion.subtitulo,
+          miniatura: coleccion.miniatura,
+          idParaGuardar: coleccion.idParaGuardar,
+          guardada: coleccion.guardada,
+          pistas: p,
+        );
+
+    yield conPistas(pistas);
 
     var token = continuacion;
     var restantes = 20;
     while (token != null && restantes-- > 0) {
       token = await _continuacion(token, pistas);
-      cActual = YtColeccion(
-        titulo: coleccion.titulo,
-        subtitulo: coleccion.subtitulo,
-        miniatura: coleccion.miniatura,
-        pistas: [...pistas],
-      );
-      yield cActual;
+      yield conPistas([...pistas]);
     }
   }
 
@@ -902,9 +1037,11 @@ class YtMusicApi {
     }
     return (
       YtColeccion(
-        titulo: cabecera.$1,
-        subtitulo: cabecera.$2,
-        miniatura: cabecera.$3,
+        titulo: cabecera.titulo,
+        subtitulo: cabecera.subtitulo,
+        miniatura: cabecera.miniatura,
+        idParaGuardar: cabecera.idParaGuardar,
+        guardada: cabecera.guardada,
         pistas: pistas,
       ),
       continuacion,
@@ -1045,6 +1182,25 @@ class YtMusicApi {
   Future<void> quitarLike(String videoId) =>
       _postBytes('like/removelike', {'target': {'videoId': videoId}});
 
+  /// Mete un **álbum o una lista** en la biblioteca de la cuenta.
+  ///
+  /// Es el mismo endpoint que el "me gusta" de una canción, cambiando
+  /// `videoId` por `playlistId` en el `target`: en YouTube Music, "guardar en
+  /// la biblioteca" y "me gusta" son la misma acción con distinto objetivo, y
+  /// eso es lo que hace aparecer el álbum en `FEmusic_liked_albums`.
+  ///
+  /// ⚠️ **[playlistId] tiene que ser el del botón de la cabecera**
+  /// (`YtColeccion.idParaGuardar`, un `OLAK5uy_…` en los álbumes), no el
+  /// `browseId` con el que se abrió. Con el `MPREb_…` la API contesta 200 y no
+  /// guarda nada — falla sin fallar, que es justo lo que no se detecta mirando
+  /// el código de estado.
+  Future<void> guardarColeccion(String playlistId) =>
+      _postBytes('like/like', {'target': {'playlistId': playlistId}});
+
+  /// Saca de la biblioteca lo que metió [guardarColeccion].
+  Future<void> quitarColeccion(String playlistId) =>
+      _postBytes('like/removelike', {'target': {'playlistId': playlistId}});
+
   // -------------------------------------------------------------- navegación
 
   static List _bloquesDeSecciones(dynamic j) {
@@ -1092,7 +1248,8 @@ class YtMusicApi {
     return null;
   }
 
-  static (String, String, String?) _parseCabecera(dynamic j) {
+  /// Lo que se saca de la cabecera de una lista o un álbum.
+  static _Cabecera _parseCabecera(dynamic j) {
     for (final candidata in [
       () => _bloquesDeSecciones(j).firstOrNull,
       () => j['header'],
@@ -1110,10 +1267,49 @@ class YtMusicApi {
           _runsCompletos(h['secondSubtitle']?['runs']),
         ].where((s) => s.isNotEmpty).join(' • ');
         final mini = _urlDeMiniatura(h['thumbnail']) ?? _urlDeMiniatura(h['background']);
-        return (titulo, sub, mini);
+        final guardar = _botonDeGuardar(h);
+        return (
+          titulo: titulo,
+          subtitulo: sub,
+          miniatura: mini,
+          idParaGuardar: guardar?.$1,
+          guardada: guardar?.$2,
+        );
       } catch (_) {}
     }
-    return ('', '', null);
+    return (
+      titulo: '',
+      subtitulo: '',
+      miniatura: null,
+      idParaGuardar: null,
+      guardada: null,
+    );
+  }
+
+  /// El `playlistId` con el que se guarda esta colección en la biblioteca, y
+  /// si ya está guardada.
+  ///
+  /// Sale del `toggleButtonRenderer` de la cabecera — el botón de marcador del
+  /// cliente oficial —, y **ese id no es el `browseId` con el que se abrió**:
+  /// un álbum se abre por `MPREb_…` y se guarda por su `OLAK5uy_…`. Mandarle
+  /// el `browseId` a `like/like` contesta 200 y no guarda nada.
+  ///
+  /// Comprobado contra la cuenta real (`like/like` sobre el `OLAK5uy_…` de un
+  /// álbum lo mete en `FEmusic_liked_albums` y deja `isToggled` en `true`).
+  static (String, bool)? _botonDeGuardar(Map h) {
+    try {
+      for (final b in (h['buttons'] as List? ?? const [])) {
+        final t = (b is Map ? b['toggleButtonRenderer'] : null) as Map?;
+        if (t == null) continue;
+        final id = (t['defaultServiceEndpoint']?['likeEndpoint']?['target']
+                ?['playlistId'] ??
+            t['toggledServiceEndpoint']?['likeEndpoint']?['target']
+                ?['playlistId']) as String?;
+        if (id == null || id.isEmpty) continue;
+        return (id, t['isToggled'] == true);
+      }
+    } catch (_) {}
+    return null;
   }
 
   // ------------------------------------------------------------------ parseo
@@ -1311,12 +1507,36 @@ class YtMusicApi {
     }
   }
 
+  /// Los prefijos de `browseId` que significan "esto es un artista".
+  ///
+  /// ⚠️ **`MPLA` es el que faltaba, y es justo el de la biblioteca.** La
+  /// pestaña "Tus artistas" (`FEmusic_library_corpus_track_artists`) no manda
+  /// el `UC…` pelado del canal: manda `MPLAUC…`, el mismo id con `MPLA`
+  /// delante. Sin reconocerlo, esas tarjetas caían en [YtTipo.desconocido],
+  /// y como sí traen `browseId`, `YtAcciones.pulsar` las mandaba a abrir como
+  /// si fueran una lista — que es de dónde salía el «No hay lista que abrir en
+  /// este elemento» al entrar a un artista de tu biblioteca.
+  static const _prefijosDeArtista = [
+    'UC',
+    'MPLAUC',
+    'MPLA',
+    'FEmusic_library_privately_owned_artist',
+  ];
+
+  /// El `browseId` con el que de verdad se pide la página de un artista.
+  ///
+  /// `MPLAUC…` responde, pero devuelve **solo lo que tienes tú en biblioteca**
+  /// de ese artista (una rejilla pelada de tus canciones suyas). El `UC…` que
+  /// lleva dentro devuelve la página completa: canciones más escuchadas,
+  /// álbumes, singles, vídeos y similares. Comprobado contra la cuenta real:
+  /// son dos respuestas distintas, y la buena es la segunda.
+  static String browseIdDeArtista(String browseId) =>
+      browseId.startsWith('MPLA') ? browseId.substring(4) : browseId;
+
   static YtTipo _tipoDe({String? videoId, String? playlistId, String? browseId}) {
     if (videoId != null) return YtTipo.cancion;
     if (browseId != null && browseId.startsWith('MPRE')) return YtTipo.album;
-    if (browseId != null &&
-        (browseId.startsWith('UC') ||
-            browseId.startsWith('FEmusic_library_privately_owned_artist'))) {
+    if (browseId != null && _prefijosDeArtista.any(browseId.startsWith)) {
       return YtTipo.artista;
     }
     if (playlistId != null ||

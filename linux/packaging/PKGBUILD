@@ -3,7 +3,7 @@
 
 pkgname=neotube-bin
 _pkgname=neotube
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=1
 pkgdesc="Cliente nativo de YouTube Music para escritorio"
 arch=('x86_64')

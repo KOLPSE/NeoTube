@@ -40,8 +40,11 @@ class DiscordRpc {
   DiscordRpc({
     DiscordTransport? transporte,
     Duration timeoutPausa = const Duration(minutes: 5),
+    Duration intervaloMinimo = _intervaloMinimoPorDefecto,
   })  : _transporte = transporte ?? _crearTransporte(),
-        _duracionTimeoutPausa = timeoutPausa;
+        _duracionTimeoutPausa = timeoutPausa,
+        // ignore: prefer_initializing_formals
+        _intervaloMinimo = intervaloMinimo;
 
   final DiscordTransport _transporte;
   final Duration _duracionTimeoutPausa;
@@ -61,6 +64,38 @@ class DiscordRpc {
   int _ultimoProgresoMs = 0;
   int _ultimaDuracionMs = 0;
   String? _ultimaFirma;
+
+  /// Cuándo se anotó [_ultimoProgresoMs], para poder extrapolarlo.
+  ///
+  /// El progreso solo llega cuando algo avisa (`notifyListeners` del
+  /// reproductor, un cambio de play/pausa), no en cada segundo de la canción.
+  /// Sin esto, un envío diferido por [_intervaloMinimo] mandaba la posición de
+  /// hace un segundo y medio y la barra de Discord quedaba corrida.
+  DateTime _instanteDelProgreso = DateTime.now();
+
+  /// Cada cuánto, como mucho, se le habla a Discord.
+  ///
+  /// ⚠️ **Discord limita `SET_ACTIVITY` a unas 5 llamadas cada 20 segundos y
+  /// no avisa de que está descartando.** Antes se mandaba una por cada cambio
+  /// de estado, así que saltar de canción deprisa gastaba el cupo en pistas
+  /// que ya no sonaban: la presencia se quedaba clavada en una de en medio y
+  /// la actualización buena —la única que traía la duración, y con ella la
+  /// barra de progreso— llegaba tarde o no llegaba.
+  ///
+  /// Con esto, la primera actualización sale al instante (un cambio de
+  /// canción normal se ve igual de rápido que antes) y las que lleguen dentro
+  /// de la ventana se **funden en una sola**, que se manda al final con el
+  /// estado de ese momento. Saltar diez veces seguidas cuesta dos envíos en
+  /// vez de diez, y el último siempre describe lo que de verdad está sonando.
+  static const _intervaloMinimoPorDefecto = Duration(milliseconds: 1500);
+
+  /// Configurable solo para los tests, que necesitan comprobar el resto del
+  /// comportamiento (el descarte por firma repetida, el timeout de pausa) sin
+  /// tener que esperar la ventana de verdad en cada aserción.
+  final Duration _intervaloMinimo;
+
+  DateTime _ultimoEnvio = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _envioDiferido;
 
   String get clientId => _clientId;
   bool get activo => _activo;
@@ -95,17 +130,12 @@ class DiscordRpc {
   Future<void> _conectar() async {
     try {
       final ok = await _transporte.conectar(_clientId);
-      if (ok && _activo) {
-        if (_ultimoTrack != null && !_pausaExpirada) {
-          await _enviarActividad(
-            track: _ultimoTrack,
-            siguiente: _siguienteTrack,
-            sonando: _ultimoSonando,
-            progresoMs: _ultimoProgresoMs,
-            duracionMs: _ultimaDuracionMs,
-            forzar: true,
-          );
-        }
+      if (ok && _activo && _ultimoTrack != null && !_pausaExpirada) {
+        // Al (re)conectar se manda ya, sin esperar la ventana: la cuenta de
+        // envíos la lleva Discord por conexión, y una presencia vacía durante
+        // segundo y medio nada más abrir Discord se ve como que no funciona.
+        _ultimaFirma = null;
+        await _enviarAhora();
       }
     } catch (_) {}
   }
@@ -116,6 +146,10 @@ class DiscordRpc {
     _reintentoTimer = null;
     _timeoutPausa?.cancel();
     _timeoutPausa = null;
+    // Sin esto, un envío que estuviera esperando su turno resucitaría la
+    // presencia justo después de haberla limpiado.
+    _envioDiferido?.cancel();
+    _envioDiferido = null;
     _pausaExpirada = false;
     _ultimoVideoId = null;
     _siguienteTrack = null;
@@ -133,6 +167,8 @@ class DiscordRpc {
   Future<void> limpiar() async {
     _timeoutPausa?.cancel();
     _timeoutPausa = null;
+    _envioDiferido?.cancel();
+    _envioDiferido = null;
     _ultimoVideoId = null;
     _siguienteTrack = null;
     _ultimoTrack = null;
@@ -156,6 +192,7 @@ class DiscordRpc {
     _ultimoSonando = sonando;
     _ultimoProgresoMs = progresoMs;
     _ultimaDuracionMs = duracionMs;
+    _instanteDelProgreso = DateTime.now();
 
     if (track == null) {
       _timeoutPausa?.cancel();
@@ -196,15 +233,7 @@ class DiscordRpc {
           _cargandoCola = false;
           if (_ultimoVideoId == track.videoId) {
             _siguienteTrack = cola.isNotEmpty ? cola.first : null;
-            if (!_pausaExpirada) {
-              unawaited(_enviarActividad(
-                track: track,
-                siguiente: _siguienteTrack,
-                sonando: _ultimoSonando,
-                progresoMs: _ultimoProgresoMs,
-                duracionMs: _ultimaDuracionMs,
-              ));
-            }
+            if (!_pausaExpirada) _programarEnvio();
           }
         }).catchError((_) {
           _cargandoCola = false;
@@ -212,46 +241,68 @@ class DiscordRpc {
       }
     }
 
-    unawaited(_enviarActividad(
-      track: track,
-      siguiente: _siguienteTrack,
-      sonando: sonando,
-      progresoMs: progresoMs,
-      duracionMs: duracionMs,
-    ));
+    _programarEnvio();
   }
 
-  Future<void> _enviarActividad({
-    required YtTrack? track,
-    YtTrack? siguiente,
-    required bool sonando,
-    required int progresoMs,
-    int duracionMs = 0,
-    bool forzar = false,
-  }) async {
+  /// Manda la actividad, o la deja programada si Discord acaba de recibir una.
+  ///
+  /// Lee el estado de los campos (`_ultimoTrack`, `_ultimoSonando`…) y no de
+  /// unos parámetros **a propósito**: un envío diferido tiene que describir lo
+  /// que está sonando **cuando le toque salir**, no lo que sonaba cuando se
+  /// programó. Capturar los valores era justo lo que dejaba la presencia
+  /// hablando de una canción que el usuario ya se había saltado.
+  void _programarEnvio({bool forzar = false}) {
+    final track = _ultimoTrack;
     if (!_activo || !_transporte.conectado || track == null) return;
 
-    final ahora = DateTime.now();
     // La duración entra en la firma porque **llega tarde**: cuando cambia la
     // pista, libmpv todavía no la sabe y se manda un 0. Sin tenerla en cuenta,
     // la actualización que sí la trae se descartaba por repetida y la barra de
     // progreso de Discord no aparecía nunca.
-    final firma =
-        '${track.videoId}|$sonando|${siguiente?.videoId}|${duracionMs > 0}';
+    final firma = '${track.videoId}|$_ultimoSonando'
+        '|${_siguienteTrack?.videoId}|${_ultimaDuracionMs > 0}';
 
-    if (!forzar && firma == _ultimaFirma) {
+    if (!forzar && firma == _ultimaFirma) return;
+    _ultimaFirma = firma;
+
+    // Ya hay uno esperando: no hace falta otro, saldrá con el estado de
+    // entonces —que para eso no se captura nada aquí.
+    if (_envioDiferido != null) return;
+
+    final espera = _intervaloMinimo - DateTime.now().difference(_ultimoEnvio);
+    if (espera <= Duration.zero) {
+      unawaited(_enviarAhora());
       return;
     }
+    _envioDiferido = Timer(espera, () {
+      _envioDiferido = null;
+      // El estado pudo dejar de merecer un envío mientras se esperaba: la
+      // pausa expiró y ya se limpió la presencia, o se paró el RPC entero.
+      if (!_activo || _pausaExpirada || _ultimoTrack == null) return;
+      unawaited(_enviarAhora());
+    });
+  }
 
-    _ultimaFirma = firma;
+  Future<void> _enviarAhora() async {
+    final track = _ultimoTrack;
+    if (!_activo || !_transporte.conectado || track == null) return;
+
+    _ultimoEnvio = DateTime.now();
+
+    // El progreso se extrapola desde que se anotó: entre que el reproductor
+    // avisa y que a este envío le toca salir pueden pasar más de un segundo, y
+    // mandar la posición vieja corre la barra de Discord hacia atrás.
+    final progresoMs = _ultimoSonando
+        ? _ultimoProgresoMs + _ultimoEnvio.difference(_instanteDelProgreso).inMilliseconds
+        : _ultimoProgresoMs;
 
     final actividad = construirActividad(
       track: track,
-      siguiente: siguiente,
-      sonando: sonando,
+      siguiente: _siguienteTrack,
+      sonando: _ultimoSonando,
       progresoMs: progresoMs,
-      duracionMs: duracionMs,
-      ahora: ahora,
+      duracionMs: _ultimaDuracionMs,
+      ahora: _ultimoEnvio,
     );
 
     final payload = construirPayloadSetActivity(

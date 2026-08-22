@@ -20,6 +20,25 @@ class YtPlayerException implements Exception {
   String toString() => message;
 }
 
+/// Qué hacer cuando una pista se acaba sola.
+///
+/// Es un ciclo de tres y no dos interruptores sueltos porque "repetir la cola"
+/// y "repetir esta pista" son excluyentes: con los dos encendidos a la vez no
+/// hay forma de decir cuál manda, y el botón acabaría teniendo un estado que
+/// no significa nada.
+enum YtRepeticion {
+  /// Al acabar la cola, se para. El comportamiento de siempre.
+  ninguna,
+
+  /// Al acabar la cola, se vuelve a la primera pista.
+  cola,
+
+  /// La pista actual se vuelve a poner indefinidamente. Un salto **manual**
+  /// sigue yendo a la siguiente: repetir es lo que pasa cuando no tocas nada,
+  /// no una cárcel.
+  pista,
+}
+
 /// Reproduce audio de YouTube sin necesitar cuenta Premium, **con cola**.
 ///
 /// Dos piezas separadas, como en el resto de la app: **resolver** la URL del
@@ -80,6 +99,13 @@ class YtPlayer extends ChangeNotifier {
       final pista = actual;
       if (pista != null && _pistaConCorte == pista.videoId) {
         unawaited(_continuarTrasCorte(pista));
+        return;
+      }
+      // Repetir esta pista: se vuelve a abrir en vez de avanzar. La URL sale
+      // de `_urls` (o el fichero de la caché), así que no cuesta otra
+      // resolución.
+      if (_repeticion == YtRepeticion.pista && pista != null) {
+        unawaited(_abrirActual());
         return;
       }
       if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
@@ -172,12 +198,20 @@ class YtPlayer extends ChangeNotifier {
   /// pausar no cambia nada del estado que lleva esta clase.
   Stream<bool> get cambiosDeSonando => _mpv?.stream.playing ?? const Stream<bool>.empty();
 
-  Duration get posicion => _mpv?.state.position ?? Duration.zero;
+  /// Con una sesión restaurada todavía sin abrir, esto es por dónde se quedó
+  /// la vez pasada: así la barra de abajo enseña la posición guardada nada más
+  /// abrir la app, en vez de un 0:00 que se corregiría solo al darle al play.
+  Duration get posicion =>
+      _pendienteDeAbrir ? (_posicionPendiente ?? Duration.zero) : (_mpv?.state.position ?? Duration.zero);
 
   Stream<Duration> get cambiosDePosicion =>
       _mpv?.stream.position ?? const Stream<Duration>.empty();
 
-  Duration get duracion => _mpv?.state.duration ?? Duration.zero;
+  /// Igual que [posicion]: mientras no haya nada abierto vale la duración que
+  /// venía guardada con la pista, que es la única que hay.
+  Duration get duracion => _pendienteDeAbrir
+      ? (actual?.duracion ?? Duration.zero)
+      : (_mpv?.state.duration ?? Duration.zero);
 
   /// Se llama justo antes de empezar a sonar algo. Es el enganche con el que
   /// `main.dart` para NeoFy: los dos modos comparten altavoces y sonar a la
@@ -231,10 +265,101 @@ class YtPlayer extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Qué pasa al acabarse una pista. Ver [YtRepeticion].
+  YtRepeticion _repeticion = YtRepeticion.ninguna;
+  YtRepeticion get repeticion => _repeticion;
+
+  /// Pasa al siguiente modo del ciclo: ninguna → cola → pista → ninguna.
+  void alternarRepeticion() {
+    _repeticion = switch (_repeticion) {
+      YtRepeticion.ninguna => YtRepeticion.cola,
+      YtRepeticion.cola => YtRepeticion.pista,
+      YtRepeticion.pista => YtRepeticion.ninguna,
+    };
+    notifyListeners();
+  }
+
+  /// Se fija al restaurar la sesión guardada, para que la interfaz recupere el
+  /// modo con el que se cerró la app.
+  void fijarRepeticion(YtRepeticion r) {
+    if (_repeticion == r) return;
+    _repeticion = r;
+    notifyListeners();
+  }
+
   YtTrack? get actual => (indice >= 0 && indice < cola.length) ? cola[indice] : null;
   bool get hayNada => actual == null;
-  bool get puedeSaltar => indice + 1 < cola.length;
+
+  /// Con la cola en bucle, "siguiente" nunca se apaga mientras haya más de una
+  /// pista: da la vuelta en vez de quedarse sin destino.
+  bool get puedeSaltar =>
+      indice + 1 < cola.length ||
+      (_repeticion == YtRepeticion.cola && cola.length > 1 && indice >= 0);
   bool get puedeVolver => cola.isNotEmpty;
+
+  // ------------------------------------------------- sesión de la vez pasada
+
+  /// La cola está puesta pero **no se ha abierto el audio todavía**.
+  ///
+  /// Es lo que deja [restaurar] al arrancar la app con la sesión de la vez
+  /// anterior: la barra de abajo enseña la canción donde se quedó, pero no
+  /// suena nada hasta que el usuario le da al play. Reproducir solo al abrir
+  /// la app es de las cosas más molestas que puede hacer un reproductor, y
+  /// aquí además cuesta una petición a YouTube que nadie ha pedido.
+  bool _pendienteDeAbrir = false;
+  bool get pendienteDeAbrir => _pendienteDeAbrir;
+
+  /// Por dónde iba la pista al cerrar. Se consume en el primer play.
+  Duration? _posicionPendiente;
+
+  /// Deja puesta la cola de la sesión anterior **sin reproducir nada**.
+  ///
+  /// Ver [_pendienteDeAbrir]. El primer [alternar] o [resume] es el que abre
+  /// el audio de verdad y salta a [posicion].
+  void restaurar({
+    required List<YtTrack> pistas,
+    required int indice,
+    Duration posicion = Duration.zero,
+    String? contexto,
+    bool aleatorio = false,
+    YtRepeticion repeticion = YtRepeticion.ninguna,
+  }) {
+    if (pistas.isEmpty || !disponible) return;
+    cola = List.unmodifiable(pistas);
+    this.indice = indice.clamp(0, pistas.length - 1);
+    this.contexto = contexto;
+    _repeticion = repeticion;
+    // Se enciende el aleatorio **sin barajar**: la cola que se acaba de
+    // restaurar ya viene en el orden barajado de la vez pasada, y pasar por
+    // `alternarAleatorio` la volvería a mezclar, cambiando lo que venía
+    // después de la canción que el usuario dejó a medias. Lo que se pierde es
+    // `_colaSinBarajar`, así que apagar el aleatorio ahora deja el orden como
+    // está en vez de recuperar el original — no hay de dónde sacarlo, y es
+    // preferible a reordenarle la cola a nadie al arrancar.
+    _aleatorio = aleatorio;
+    _posicionPendiente = posicion > Duration.zero ? posicion : null;
+    _pendienteDeAbrir = true;
+    notifyListeners();
+  }
+
+  /// Si había una sesión restaurada sin abrir, la abre ahora. Devuelve `true`
+  /// si se ha encargado ella del play, para que quien llama no siga adelante.
+  Future<bool> _arrancarSiEstabaPendiente() async {
+    if (!_pendienteDeAbrir || actual == null) return false;
+    _pendienteDeAbrir = false;
+    final desde = _posicionPendiente;
+    _posicionPendiente = null;
+    await _abrirActual(desde: desde);
+    return true;
+  }
+
+  /// Olvida la sesión restaurada: la ha reemplazado un movimiento del usuario
+  /// (saltar, elegir otra pista) y su posición guardada ya no vale para lo que
+  /// va a sonar.
+  void _descartarPendiente() {
+    _pendienteDeAbrir = false;
+    _posicionPendiente = null;
+  }
 
   /// Qué pista se está resolviendo ahora mismo (su `videoId`), para que la
   /// tarjeta pulsada pueda enseñar su ruedecita. `null` si no hay ninguna.
@@ -786,6 +911,7 @@ class YtPlayer extends ChangeNotifier {
     String? contexto,
   }) async {
     if (pistas.isEmpty || !disponible) return;
+    _descartarPendiente();
     final indiceDeseado = desde.clamp(0, pistas.length - 1);
     final pistaDeseada = pistas[indiceDeseado];
     // Evita doble clic impaciente sobre la misma pista que ya se está abriendo
@@ -832,7 +958,11 @@ class YtPlayer extends ChangeNotifier {
     _adelantarSiguiente();
   }
 
-  Future<void> _abrirActual() async {
+  /// Abre la pista actual. [desde] solo lo usa la sesión restaurada: se pasa
+  /// como `Media(start:)` (la opción `--start` de mpv, que se aplica al cargar)
+  /// y no como un `seek` posterior, porque un seek justo después de `open` se
+  /// pierde si el medio todavía no ha terminado de abrirse.
+  Future<void> _abrirActual({Duration? desde}) async {
     final t = actual;
     final mpv = _mpv;
     if (t == null || mpv == null) return;
@@ -862,7 +992,7 @@ class YtPlayer extends ChangeNotifier {
         debugPrint('NeoTube: ${t.videoId} sale de la caché en '
             '${reloj.elapsedMilliseconds}ms (sin red)');
         _continuaciones[t.videoId] = Future<File?>.value(enCache);
-        await mpv.open(Media(enCache.path));
+        await mpv.open(Media(enCache.path, start: desde));
         _fijarProgresoDescarga(t.videoId, 1);
         _adelantarSiguiente();
         _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
@@ -881,7 +1011,7 @@ class YtPlayer extends ChangeNotifier {
         url,
         onCorte: () => _pistaConCorte = t.videoId,
       );
-      await mpv.open(Media(urlLocal.toString()));
+      await mpv.open(Media(urlLocal.toString(), start: desde));
       _adelantarSiguiente();
       _temporizadorAbriendo = Timer(const Duration(seconds: 7), () {
         if (_pistaAbriendo == t.videoId) _pistaAbriendo = null;
@@ -1011,7 +1141,17 @@ class YtPlayer extends ChangeNotifier {
   Future<void> siguiente({bool automatico = false}) async {
     final mpv = _mpv;
     if (mpv == null) return;
-    if (!puedeSaltar) {
+    _descartarPendiente();
+
+    final hayOtraDetras = indice + 1 < cola.length;
+    // Fin de la cola con el bucle puesto: se vuelve a la primera en vez de
+    // parar. Con una sola pista en la cola, eso es repetirla — que es
+    // exactamente lo que espera quien puso "repetir todo".
+    final daLaVuelta = !hayOtraDetras &&
+        _repeticion == YtRepeticion.cola &&
+        cola.isNotEmpty;
+
+    if (!hayOtraDetras && !daLaVuelta) {
       if (!automatico) return;
       if (alAcabarLaCola != null) {
         await alAcabarLaCola!();
@@ -1023,13 +1163,16 @@ class YtPlayer extends ChangeNotifier {
       await mpv.seek(Duration.zero);
       return;
     }
+
     _temporizadorReintentoSalto?.cancel();
     final indiceAnterior = indice;
-    indice++;
+    indice = daLaVuelta ? 0 : indice + 1;
     try {
       await _abrirActual();
     } catch (_) {
-      if (automatico && puedeSaltar) {
+      // Al dar la vuelta no se reintenta en cadena: si la primera pista de la
+      // cola falla, seguir bajando recorrería la lista entera otra vez.
+      if (automatico && !daLaVuelta && indice + 1 < cola.length) {
         await siguiente(automatico: true);
         return;
       }
@@ -1045,6 +1188,13 @@ class YtPlayer extends ChangeNotifier {
   Future<void> anterior() async {
     final mpv = _mpv;
     if (mpv == null) return;
+    // "Anterior" sobre una sesión restaurada que aún no ha sonado significa
+    // reabrir esa misma pista desde el principio, no rebobinar un mpv vacío.
+    if (_pendienteDeAbrir) {
+      _descartarPendiente();
+      await _abrirActual();
+      return;
+    }
     _temporizadorReintentoSalto?.cancel();
     // Igual que en NeoFy: pasados 3 s, "anterior" reinicia la canción.
     if (mpv.state.position.inSeconds > 3 || indice <= 0) {
@@ -1059,6 +1209,13 @@ class YtPlayer extends ChangeNotifier {
   /// reproducción, o pulsar una fila de una playlist ya sonando).
   Future<void> saltarA(int i) async {
     if (i < 0 || i >= cola.length) return;
+    // Saltar a la misma pista que dejó la sesión restaurada sí conserva su
+    // posición: es "sigue por donde iba", no "empieza otra".
+    if (_pendienteDeAbrir && i == indice) {
+      await _arrancarSiEstabaPendiente();
+      return;
+    }
+    _descartarPendiente();
     _temporizadorReintentoSalto?.cancel();
     indice = i;
     await _abrirActual();
@@ -1067,6 +1224,9 @@ class YtPlayer extends ChangeNotifier {
   Future<void> alternar() async {
     final mpv = _mpv;
     if (mpv == null) return;
+    // El primer play tras abrir la app: aquí es donde de verdad arranca la
+    // canción que se estaba escuchando la vez pasada. Ver [restaurar].
+    if (await _arrancarSiEstabaPendiente()) return;
     // Si la cola llegó al final, un `play` pelado no arranca nada: se vuelve a
     // empezar por donde se quedó. Mismo criterio que `PlayerController`.
     if (!mpv.state.playing &&
@@ -1108,10 +1268,25 @@ class YtPlayer extends ChangeNotifier {
   }
 
   Future<void> pause() async => _mpv?.pause();
-  Future<void> resume() async => _mpv?.play();
+
+  /// El play de los mandos de fuera (panel de Windows, MPRIS, teclas). Tiene
+  /// que arrancar la sesión restaurada igual que el botón de la app: si no, el
+  /// play del escritorio no haría nada al abrir NeoTube.
+  Future<void> resume() async {
+    if (await _arrancarSiEstabaPendiente()) return;
+    await _mpv?.play();
+  }
 
   Future<void> seek(Duration d) async {
     if (_mpv == null) return;
+    // Aún no hay nada abierto (sesión restaurada): mover la barra cambia por
+    // dónde va a empezar, que es lo que el usuario está pidiendo.
+    if (_pendienteDeAbrir) {
+      _posicionPendiente = d > Duration.zero ? d : null;
+      notifyListeners();
+      onSalto?.call(d.inMilliseconds);
+      return;
+    }
     await _mpv.seek(d);
     onSalto?.call(d.inMilliseconds);
   }
@@ -1122,6 +1297,7 @@ class YtPlayer extends ChangeNotifier {
     _pistaAbriendo = null;
     _reintentosHechos = 0;
     _pistaConCorte = null;
+    _descartarPendiente();
     await _mpv?.stop();
     cola = const [];
     indice = -1;

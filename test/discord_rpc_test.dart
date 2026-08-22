@@ -289,7 +289,10 @@ void main() {
   group('DiscordRpc: no reenviar por deriva de posición', () {
     test('la misma pista no reenvía aunque cambie el progreso; una pista nueva sí', () async {
       final transporte = _FakeTransport();
-      final rpc = DiscordRpc(transporte: transporte);
+      final rpc = DiscordRpc(
+        transporte: transporte,
+        intervaloMinimo: Duration.zero,
+      );
       Future<List<YtTrack>> colaVacia() async => const [];
 
       rpc.start('123456');
@@ -323,6 +326,7 @@ void main() {
       final transporte = _FakeTransport();
       final rpc = DiscordRpc(
         transporte: transporte,
+        intervaloMinimo: Duration.zero,
         timeoutPausa: const Duration(milliseconds: 30),
       );
       Future<List<YtTrack>> colaVacia() async => const [];
@@ -361,6 +365,7 @@ void main() {
       final transporte = _FakeTransport();
       final rpc = DiscordRpc(
         transporte: transporte,
+        intervaloMinimo: Duration.zero,
         timeoutPausa: const Duration(milliseconds: 40),
       );
       Future<List<YtTrack>> colaVacia() async => const [];
@@ -398,6 +403,7 @@ void main() {
       final transporte = _FakeTransport();
       final rpc = DiscordRpc(
         transporte: transporte,
+        intervaloMinimo: Duration.zero,
         timeoutPausa: const Duration(milliseconds: 50),
       );
       Future<List<YtTrack>> colaVacia() async => const [];
@@ -436,6 +442,7 @@ void main() {
       final transporte = _FakeTransport();
       final rpc = DiscordRpc(
         transporte: transporte,
+        intervaloMinimo: Duration.zero,
         timeoutPausa: const Duration(milliseconds: 40),
       );
       Future<List<YtTrack>> colaVacia() async => const [];
@@ -467,6 +474,7 @@ void main() {
       final transporte = _FakeTransport();
       final rpc = DiscordRpc(
         transporte: transporte,
+        intervaloMinimo: Duration.zero,
         timeoutPausa: const Duration(milliseconds: 40),
       );
       Future<List<YtTrack>> colaVacia() async => const [];
@@ -486,6 +494,129 @@ void main() {
 
       await Future<void>.delayed(const Duration(milliseconds: 60));
       expect(transporte.envios, enviosTrasStop);
+    });
+  });
+
+  group('DiscordRpc: saltar de canción deprisa', () {
+    // El fallo que esto fija: cada cambio de estado escribía en el pipe, así
+    // que saltar deprisa gastaba el cupo de Discord (unas 5 llamadas por 20 s,
+    // que descarta sin avisar) en pistas ya descartadas. La presencia se
+    // quedaba en una de en medio y la actualización con la duración —la única
+    // que dibuja la barra de progreso— llegaba tarde o se perdía.
+    test('cinco saltos seguidos se funden, y el último estado es el que se manda',
+        () async {
+      final transporte = _FakeTransport();
+      final rpc = DiscordRpc(
+        transporte: transporte,
+        intervaloMinimo: const Duration(milliseconds: 60),
+      );
+      Future<List<YtTrack>> colaVacia() async => const [];
+
+      rpc.start('123456');
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      for (var i = 0; i < 5; i++) {
+        rpc.actualizarActividad(
+          track: _track(videoId: 'pista-$i', titulo: 'Pista $i'),
+          sonando: true,
+          progresoMs: 0,
+          duracionMs: 0,
+          obtenerCola: colaVacia,
+        );
+        await Future<void>.delayed(Duration.zero);
+      }
+
+      // La primera sale al instante (un cambio de canción normal no se
+      // retrasa); las otras cuatro se funden en el envío diferido.
+      expect(transporte.envios, 1);
+
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      expect(transporte.envios, 2);
+
+      final ultimo = jsonDecode(transporte.payloads.last) as Map<String, dynamic>;
+      final actividad =
+          (ultimo['args'] as Map<String, dynamic>)['activity'] as Map<String, dynamic>;
+      expect(actividad['details'], 'Pista 4',
+          reason: 'el envío diferido describe lo que suena cuando le toca '
+              'salir, no lo que sonaba cuando se programó');
+
+      await rpc.stop();
+    });
+
+    test('la duración que llega tarde acaba mandándose, con su `end`', () async {
+      final transporte = _FakeTransport();
+      final rpc = DiscordRpc(
+        transporte: transporte,
+        intervaloMinimo: const Duration(milliseconds: 60),
+      );
+      Future<List<YtTrack>> colaVacia() async => const [];
+
+      rpc.start('123456');
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      // Al cambiar de pista, libmpv todavía no sabe cuánto dura: se manda un 0.
+      final pista = _track(duracion: null);
+      rpc.actualizarActividad(
+          track: pista, sonando: true, progresoMs: 0, duracionMs: 0, obtenerCola: colaVacia);
+      await Future<void>.delayed(Duration.zero);
+      expect(transporte.envios, 1);
+
+      final primero = jsonDecode(transporte.payloads.last) as Map<String, dynamic>;
+      final sinDuracion =
+          (primero['args'] as Map<String, dynamic>)['activity'] as Map<String, dynamic>;
+      expect((sinDuracion['timestamps'] as Map<String, dynamic>)['end'], isNull);
+
+      // Y cuando la sabe, dentro de la ventana de agrupado.
+      rpc.actualizarActividad(
+          track: pista,
+          sonando: true,
+          progresoMs: 500,
+          duracionMs: 213573,
+          obtenerCola: colaVacia);
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+
+      expect(transporte.envios, 2);
+      final segundo = jsonDecode(transporte.payloads.last) as Map<String, dynamic>;
+      final conDuracion =
+          (segundo['args'] as Map<String, dynamic>)['activity'] as Map<String, dynamic>;
+      expect((conDuracion['timestamps'] as Map<String, dynamic>)['end'], isNotNull,
+          reason: 'sin `end` Discord no dibuja la barra de progreso');
+
+      await rpc.stop();
+    });
+
+    test('parar cancela el envío que estuviera esperando', () async {
+      final transporte = _FakeTransport();
+      final rpc = DiscordRpc(
+        transporte: transporte,
+        intervaloMinimo: const Duration(milliseconds: 60),
+      );
+      Future<List<YtTrack>> colaVacia() async => const [];
+
+      rpc.start('123456');
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      rpc.actualizarActividad(
+          track: _track(), sonando: true, progresoMs: 0, duracionMs: 0, obtenerCola: colaVacia);
+      await Future<void>.delayed(Duration.zero);
+      rpc.actualizarActividad(
+          track: _track(videoId: 'otra'),
+          sonando: true,
+          progresoMs: 0,
+          duracionMs: 0,
+          obtenerCola: colaVacia);
+      await Future<void>.delayed(Duration.zero);
+
+      await rpc.stop();
+      final trasParar = transporte.envios;
+
+      // Sin cancelar el temporizador, el envío pendiente resucitaría la
+      // presencia justo después de haberla limpiado.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
+      expect(transporte.envios, trasParar);
     });
   });
 }

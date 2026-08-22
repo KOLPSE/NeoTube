@@ -123,3 +123,91 @@ class YtFavoritos extends ChangeNotifier {
     }
   }
 }
+
+/// Qué álbumes y listas tiene el usuario guardados en su biblioteca.
+///
+/// Hermano de [YtFavoritos], pero **no comparte su forma de enterarse**, y esa
+/// es toda la razón de que sea una clase aparte:
+///
+/// - Los "me gusta" de canciones se saben de golpe: una sola petición a la
+///   lista `LM` trae todos los `videoId` marcados, así que [YtFavoritos] puede
+///   cargarlos al arrancar y responder por cualquier canción.
+/// - Para un álbum o una lista **no hay lista equivalente que valga**. Lo que
+///   sí llega, gratis, es el `isToggled` del botón de marcador que viene
+///   dentro de la cabecera de cada colección al abrirla
+///   ([YtColeccion.guardada]). Así que aquí el estado no se carga: se
+///   **siembra** ([sembrar]) según se van abriendo colecciones.
+///
+/// Por eso [estado] devuelve `bool?`: `null` es "todavía no lo sé", que es
+/// distinto de "no está guardado" y no debe pintarse igual que un corazón
+/// apagado con certeza.
+class YtColeccionesGuardadas extends ChangeNotifier {
+  YtColeccionesGuardadas(this._api);
+
+  final YtMusicApi _api;
+
+  final Set<String> _guardadas = {};
+  final Set<String> _conocidas = {};
+  final Set<String> _enVuelo = {};
+
+  /// `true` guardada, `false` no guardada, `null` sin saber todavía.
+  bool? estado(String playlistId) =>
+      _conocidas.contains(playlistId) ? _guardadas.contains(playlistId) : null;
+
+  bool estaOcupada(String playlistId) => _enVuelo.contains(playlistId);
+
+  /// Anota lo que dice la cabecera recién traída de la API.
+  ///
+  /// **No pisa lo que ya se sepa de este id.** La colección puede venir de la
+  /// caché en memoria, con el `isToggled` de antes de que el usuario tocara el
+  /// corazón hace diez segundos; dejar que ese valor viejo mande sería ver el
+  /// corazón apagarse solo al volver a entrar.
+  void sembrar(String playlistId, bool guardada) {
+    if (_conocidas.contains(playlistId)) return;
+    _conocidas.add(playlistId);
+    if (guardada) _guardadas.add(playlistId);
+    notifyListeners();
+  }
+
+  /// Guarda o saca de la biblioteca, pintando el cambio antes de que YouTube
+  /// conteste y deshaciéndolo si falla — mismo criterio que
+  /// [YtFavoritos.alternar]. Devuelve `false` si no se pudo.
+  Future<bool> alternar(String playlistId) async {
+    if (_enVuelo.contains(playlistId)) return false;
+    final estaba = _guardadas.contains(playlistId);
+    _enVuelo.add(playlistId);
+    _conocidas.add(playlistId);
+    if (estaba) {
+      _guardadas.remove(playlistId);
+    } else {
+      _guardadas.add(playlistId);
+    }
+    notifyListeners();
+    try {
+      if (estaba) {
+        await _api.quitarColeccion(playlistId);
+      } else {
+        await _api.guardarColeccion(playlistId);
+      }
+      // La biblioteca cacheada acaba de quedarse vieja: sin tirarla, entrar en
+      // Biblioteca justo después seguiría sin enseñar el álbum recién
+      // guardado, y parecería que el corazón no hizo nada.
+      _api.cache
+        ..remove('biblioteca')
+        ..remove('browse:${YtMusicApi.browseIdAlbumes}')
+        ..remove('browse:${YtMusicApi.browseIdListas}');
+      return true;
+    } catch (e) {
+      if (estaba) {
+        _guardadas.add(playlistId);
+      } else {
+        _guardadas.remove(playlistId);
+      }
+      debugPrint('[NeoTube biblioteca] no se pudo cambiar $playlistId: $e');
+      return false;
+    } finally {
+      _enVuelo.remove(playlistId);
+      notifyListeners();
+    }
+  }
+}

@@ -50,6 +50,7 @@ Cuatro piezas, cuatro ficheros. Todo lo demás es interfaz.
 | `yt_local_proxy.dart` | Retransmite esa URL en `127.0.0.1`, troceada, porque libmpv no puede pedirla de un tirón. Ver §5. |
 | `yt_home_store.dart` | Estado de una pantalla de secciones (portada, explorar, biblioteca). |
 | `discord_rpc.dart` | Rich Presence por IPC nativo de Discord. Apagado por defecto. |
+| `yt_sesion.dart` | La cola de la vez pasada, en `sesion.json`. **No reproduce nada al abrir** — ver §5. |
 
 ### La interfaz (`lib/ui/`)
 
@@ -58,7 +59,8 @@ Cuatro piezas, cuatro ficheros. Todo lo demás es interfaz.
 | `neotube_shell.dart` | El armazón: barra lateral, vistas, barra de reproducción abajo. Es el punto de entrada de la app. |
 | `yt_browse_screen.dart` | Portada, Explorar y Biblioteca — las tres son «secciones con tarjetas», así que las tres son esta pantalla. |
 | `yt_search_screen.dart` | Buscador. |
-| `yt_playlist_screen.dart` | Una lista, un álbum o un artista abiertos. |
+| `yt_playlist_screen.dart` | Una lista o un álbum abiertos, con el corazón que lo guarda en la biblioteca. |
+| `yt_artista_screen.dart` | La página de un artista: cabecera, más escuchadas (como filas, no como tarjetas) y sus carruseles. |
 | `yt_login_screen.dart` | La pantalla que lanza la WebView. |
 | `yt_acciones.dart` | Qué pasa al pulsar una tarjeta. Está aparte porque lo comparten las tres pantallas. |
 | `yt_ajustes.dart` | El bloque de Ajustes propio: versión y ruta de yt-dlp. |
@@ -177,6 +179,68 @@ ocurrió.
 - **El buscador con el filtro de «solo canciones» no puede devolver listas.** Visto así es una
   obviedad, pero pasarle los `params` de canciones era justo lo que impedía llegar a una
   playlist desde la búsqueda.
+
+- **Los artistas de tu biblioteca llegan como `MPLAUC…`, no como `UC…`.** La pestaña
+  `FEmusic_library_corpus_track_artists` antepone `MPLA` al id del canal. Reconocer solo `UC`
+  dejaba esas tarjetas en `YtTipo.desconocido` y —como sí traen `browseId`— acababan
+  intentando abrirse **como si fueran una lista**, con el mensaje «No hay lista que abrir en
+  este elemento» encima de una tarjeta que decía tener canciones. Los dos ids responden, pero
+  **no lo mismo**: `MPLAUC…` devuelve solo lo que tú tienes en biblioteca de ese artista;
+  `UC…` devuelve la página completa (más escuchadas, álbumes, singles, vídeos). Por eso
+  `YtMusicApi.browseIdDeArtista` le quita el `MPLA` antes de pedirla.
+
+- **Un álbum se abre por `MPREb_…` y se guarda por `OLAK5uy_…`, y no son el mismo id.** Para
+  meter un álbum o una lista ajenos en la biblioteca no hay endpoint propio: es el **mismo**
+  `like/like` de las canciones cambiando `videoId` por `playlistId` en el `target`. El id que
+  hay que mandar sale del `toggleButtonRenderer` de la cabecera
+  (`buttons[].toggleButtonRenderer.defaultServiceEndpoint.likeEndpoint.target.playlistId`), y
+  ⚠️ **mandar el `browseId` en su lugar no da error: contesta 200 y no guarda nada.**
+
+  Ese mismo botón trae `isToggled`, que es **la única forma barata de saber si ya está
+  guardado**: no hay una lista de "álbumes guardados" que consultar de golpe como sí la hay
+  para los "me gusta" de canciones (`VLLM`). De ahí que `YtColeccionesGuardadas` no cargue
+  nada al arrancar y se vaya enterando según se abren colecciones.
+
+- **Los `params` de los filtros de búsqueda son opacos y hay que copiarlos.** Son protobuf
+  serializado y urlencodeado; no se construyen. Están en `YtFiltroBusqueda`, comprobados uno a
+  uno contra la cuenta real. El de listas devuelve «Listas de la comunidad» — las destacadas
+  van en otro `params` distinto.
+
+- **Las pistas de un álbum no traen miniatura, pero las de una lista sí.** Ya estaba anotado en
+  `YtTrack.conMiniatura`, y es lo que hace que pintar la carátula en cada fila de
+  `YtPlaylistScreen` funcione en los dos casos: en una lista cada pista trae la suya, y en un
+  álbum heredan la portada de la cabecera.
+
+### ⚠️ El tamaño de una carátula no lo decide la API, lo decide la URL
+
+La biblioteca y las canciones de la búsqueda traen **como mucho 120 px** de miniatura (dos
+escalones: 60 y 120), y la app las pinta en tarjetas de 132 px lógicos — 264 reales en una
+pantalla HiDPI. El resultado era una carátula borrosa donde debería haber una portada.
+
+Lo que no es evidente: el `=w120-h120-l90-rj` del final de esas URLs **no describe la imagen,
+es una petición de reescalado** que `googleusercontent` atiende al vuelo. La misma URL con
+`=w544-h544-l90-rj` devuelve 200 y 62 KB frente a los 4,4 KB de la de 120 — comprobado contra
+el servidor real. `urlDeCaratulaEscalada` (`ui/art_image.dart`) reescribe ese token al tamaño
+que de verdad se va a pintar, cuantizado en escalones fijos porque **la URL es la clave de la
+caché de disco** y pedir 132 aquí y 133 allí serían dos descargas del mismo JPEG.
+
+Dos cosas que no se pueden tocar ahí: se conserva la proporción (el banner de un artista llega
+como `=w540-h225` y forzarlo a cuadrado lo deforma), y las miniaturas de vídeo de `i.ytimg.com`
+se devuelven **intactas** — no entienden esos parámetros, y añadírselos cambia una imagen
+borrosa por un 404.
+
+Y dos trampas más de `ArtImage`, las dos aprendidas rompiéndolo:
+
+- **`cacheWidth` sin `cacheHeight` pixela las carátulas cuadradas.** Muchas miniaturas de
+  YouTube son 16:9. Descodificando solo por el ancho salen 132 × 74 para una tarjeta de 132, y
+  entonces `BoxFit.cover` tiene que **ampliar 1,8×** para llenar el cuadrado. Por eso se pasan
+  las dos medidas en las cajas cuadradas y solo el ancho en la apaisada del banner, donde la
+  imagen ya viene apaisada y `cover` se limita a recortar.
+
+- **`cacheWidth` no puede ser el tamaño al que se pinta si eso pasa del original.** El banner
+  maximizado ocupa unos 3840 px reales: pedir esa descodificación son ~24 MB de bitmap por
+  imagen, **ampliando** un JPEG de 1280 —ni un píxel de nitidez de más—, y al maximizar se
+  encadenan varias. `anchoDeDecodificacion` lo capa al escalón que de verdad se ha descargado.
 
 ---
 
@@ -391,6 +455,65 @@ propio `expire`, unas 6 h), así que guardarlas más tiempo es guardarse un fall
 La siguiente pista se sigue resolviendo mientras suena la actual, aunque ahora cueste ~120 ms:
 es barato, y quita el silencio entre pistas también cuando toca caer al plan B.
 
+### La sesión que se recupera pero no se reproduce sola
+
+`yt_sesion.dart` guarda en `sesion.json` la cola, el índice, la posición y los modos (aleatorio
+y repetición): al cambiar de pista, cada 20 s —lo que cambia sin avisar es la **posición**, y
+es justo lo que hace falta si la app se cierra de malas maneras— y en `_quit`, ⚠️ **antes de
+`player.stop()`**, que vacía la cola: guardar después es guardar que no había nada sonando.
+
+Al abrir, `YtPlayer.restaurar` deja la cola puesta y la pista seleccionada **sin abrir el
+audio** (`_pendienteDeAbrir`). El primer `alternar`/`resume` —el botón de play de la app, el
+del panel del sistema o el de MPRIS, los tres— es el que abre de verdad y salta a la posición
+guardada, pasándola como `Media(start:)` y no como un `seek` posterior: un seek justo después
+de `open` se pierde si el medio aún no ha terminado de abrirse.
+
+Que no suene sola es deliberado, y por dos motivos: una app que se pone a sonar al arrancar es
+una app que hay que correr a silenciar, y además resolver el stream cuesta una petición a
+YouTube por cada arranque, la escuche alguien o no. Mientras nada se ha abierto, `posicion` y
+`duracion` devuelven lo guardado en vez de los ceros de libmpv, para que la barra de abajo
+enseñe dónde te quedaste desde el primer frame.
+
+No vive en `config.json` porque aquello son **preferencias** (se escriben cuando el usuario
+decide algo) y esto es un *snapshot* que se reescribe solo y puede ocupar cientos de veces
+más: mezclarlos haría que un cierre a mitad de escritura se llevara por delante los ajustes.
+
+### ⚠️ En Windows, maximizar la ventana cerraba la app — y la culpa es de la accesibilidad
+
+El síntoma: **la app desaparece al maximizar**, en cualquier pantalla. Sin excepción de Dart,
+sin stack, sin una línea en el log. Pasaba también en la 1.0.0 publicada, así que no es de la
+interfaz nueva.
+
+Lo que lo delata no está en el log de Flutter sino en el **visor de eventos de Windows**
+(`Application Error`): `neotube.exe`, código `0xc0000005` —violación de acceso—, módulo
+`flutter_windows.dll`. Es decir, revienta el *embedder*, no el código Dart; por eso no queda
+rastro por el lado de Dart.
+
+La causa está a la vista en el log, pero parecía ruido inofensivo: desde el primer frame se
+repite
+
+```
+[ERROR:...accessibility_bridge.cc(114)] Failed to update ui::AXTree, error:
+Nodes left pending by the update: 5 6 7 8 9 10 11 12 13 14 15 16 17 20
+```
+
+El puente de accesibilidad no consigue construir el árbol de esta app. Con el árbol en ese
+estado, en cuanto Windows pide eventos de accesibilidad —y maximizar pide varios— el motor los
+despacha sobre nodos que no existen.
+
+El rodeo es un `ExcludeSemantics` sobre la raíz, en `main.dart`. **No se pierde accesibilidad
+real**: el árbol nunca llegaba a construirse, así que un lector de pantalla ya no recibía nada;
+lo que se quita es un árbol roto que además mataba la app.
+
+**Cómo se comprueba, sin tener que maximizar a mano:** se lanza el ejecutable y se le manda
+`ShowWindow(hwnd, SW_SHOWMAXIMIZED)` desde PowerShell, comprobando después si el proceso sigue
+vivo. Sin el `ExcludeSemantics` muere en el primer intento; con él aguanta el ciclo entero de
+maximizar / restaurar / minimizar. Es la única forma rápida de saber si una versión lo tiene:
+mirar el log no vale, porque el log no dice nada.
+
+Si algún día se quiere accesibilidad de verdad, el arreglo **no** es tocar esa línea: hay que
+encontrar qué widget deja nodos colgando y corregir ese árbol.
+
 ### ⚠️ libmpv se abre con `dlopen`, así que `ldd` no la ve
 
 `media_kit` **no empaqueta libmpv en Linux** (en Windows sí: `libmpv-2.dll` viaja dentro). La
@@ -541,6 +664,26 @@ Lo que cambió respecto al de NeoFy, y por qué:
 >
 > El nombre real se consulta sin entrar al portal, porque la lista es pública:
 > `curl https://discord.com/api/v9/oauth2/applications/<clientId>/assets`
+
+#### ⚠️ Discord descarta actualizaciones y no lo dice
+
+`SET_ACTIVITY` está limitado a unas **5 llamadas cada 20 segundos**. Pasado el cupo, Discord no
+contesta un error ni cierra el pipe: simplemente ignora lo que le mandes. Escribir en cada
+cambio de estado —que es lo que se hacía— significaba que **saltar de canción deprisa gastaba
+el cupo en pistas ya descartadas**: la presencia se quedaba clavada en una de en medio, y la
+actualización que traía la duración (la única que hace que Discord dibuje la barra de progreso,
+porque sin `end` no hay barra) llegaba tarde o no llegaba.
+
+`DiscordRpc._programarEnvio` lo arregla fundiendo la ráfaga: el primer cambio sale al instante
+—un cambio de canción normal no se retrasa nada— y los que lleguen dentro de la ventana se
+juntan en un solo envío diferido. Dos detalles que parecen de adorno y no lo son:
+
+- **El envío diferido lee los campos, no unos parámetros capturados.** Tiene que describir lo
+  que suena *cuando le toca salir*, no lo que sonaba cuando se programó; capturar los valores
+  era exactamente lo que dejaba la presencia hablando de una canción ya saltada.
+- **El progreso se extrapola** desde el instante en que se anotó (`_instanteDelProgreso`): el
+  reproductor solo avisa cuando cambia algo, no cada segundo, así que mandar la posición tal
+  cual corría la barra de Discord hacia atrás.
 
 ---
 

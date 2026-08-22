@@ -15,6 +15,7 @@ import 'art_image.dart';
 import 'settings_dialog.dart';
 import 'yt_acciones.dart';
 import 'yt_ajustes.dart';
+import 'yt_artista_screen.dart';
 import 'yt_browse_screen.dart';
 import 'yt_login_screen.dart';
 import 'yt_playlist_screen.dart';
@@ -58,10 +59,14 @@ class NeoTubeShell extends StatefulWidget {
 class _NeoTubeShellState extends State<NeoTubeShell> {
   _NeoTubeView _view = _NeoTubeView.inicio;
 
-  /// La lista o el álbum abierto encima de la pestaña actual, si lo hay. Es
-  /// toda la pila de navegación que hace falta: desde una lista solo se
-  /// vuelve atrás.
-  YtItem? _abierto;
+  /// Lo que hay abierto encima de la pestaña actual: listas, álbumes y páginas
+  /// de artista, en el orden en que se entró.
+  ///
+  /// Era un solo elemento hasta que existieron las páginas de artista. Ahora
+  /// hace falta una pila de verdad porque desde un artista se entra a sus
+  /// álbumes, y "volver" desde ahí tiene que devolver **al artista**, no a la
+  /// pestaña de la que se venía.
+  final List<YtItem> _pila = [];
 
   // Un store por pestaña, creado una vez y no en cada `_content()`: así no se
   // repite la carga cada vez que se cambia de pestaña y se vuelve.
@@ -76,10 +81,18 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
   late final YtAcciones _acciones = YtAcciones(
     api: widget.api,
     player: widget.player,
-    abrir: (item) => setState(() => _abierto = item),
+    abrir: _apilar,
+    abrirArtista: _apilar,
   );
 
   late final YtFavoritos _favoritos = YtFavoritos(widget.api);
+  late final YtColeccionesGuardadas _guardadas = YtColeccionesGuardadas(widget.api);
+
+  void _apilar(YtItem item) => setState(() => _pila.add(item));
+
+  void _volver() => setState(() {
+        if (_pila.isNotEmpty) _pila.removeLast();
+      });
 
   String? _ultimoError;
 
@@ -135,7 +148,7 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
 
   void _irA(_NeoTubeView v) => setState(() {
         _view = v;
-        _abierto = null;
+        _pila.clear();
       });
 
   @override
@@ -177,17 +190,30 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     if (!widget.auth.isLoggedIn) {
       return YtLoginScreen(auth: widget.auth, onLoggedIn: () async => setState(() {}));
     }
-    final abierto = _abierto;
-    if (abierto != null) {
+    if (_pila.isNotEmpty) {
+      final abierto = _pila.last;
+      // La clave evita que al abrir otra lista se reutilice el estado (y las
+      // pistas) de la anterior mientras carga la nueva.
+      final clave = ValueKey('${_pila.length}:'
+          '${abierto.playlistId ?? abierto.browseId}');
+      if (abierto.esArtista) {
+        return YtArtistaScreen(
+          key: clave,
+          item: abierto,
+          api: widget.api,
+          player: widget.player,
+          acciones: _acciones,
+          onVolver: _volver,
+        );
+      }
       return YtPlaylistScreen(
-        // La clave evita que al abrir otra lista se reutilice el estado (y las
-        // pistas) de la anterior mientras carga la nueva.
-        key: ValueKey(abierto.playlistId ?? abierto.browseId),
+        key: clave,
         item: abierto,
         api: widget.api,
         player: widget.player,
         favoritos: _favoritos,
-        onVolver: () => setState(() => _abierto = null),
+        guardadas: _guardadas,
+        onVolver: _volver,
       );
     }
     return switch (_view) {
@@ -550,6 +576,7 @@ class _BarraInferior extends StatelessWidget {
                       color: player.aleatorio ? theme.colorScheme.primary : null,
                       onPressed: player.alternarAleatorio,
                     ),
+                    _BotonRepetir(player: player),
                     IconButton(
                       icon: const Icon(Icons.skip_previous),
                       tooltip: 'Anterior',
@@ -596,6 +623,38 @@ class _BarraInferior extends StatelessWidget {
     );
   },
 );
+  }
+}
+
+/// El botón de repetir: un solo icono que recorre los tres modos.
+///
+/// Se distinguen como los distingue cualquier reproductor y como los distingue
+/// el ojo sin leer nada: **apagado** en gris (no repetir), **encendido** en el
+/// color de marca (repetir la cola) y encendido **con el icono del «1»**
+/// (repetir esta canción). Sin ese cambio de icono, "repetir todo" y "repetir
+/// una" se ven idénticos y hay que pulsar para averiguar en cuál estás.
+class _BotonRepetir extends StatelessWidget {
+  const _BotonRepetir({required this.player});
+
+  final YtPlayer player;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final modo = player.repeticion;
+    final activo = modo != YtRepeticion.ninguna;
+    return IconButton(
+      icon: Icon(
+        modo == YtRepeticion.pista ? Icons.repeat_one : Icons.repeat,
+      ),
+      color: activo ? theme.colorScheme.primary : null,
+      tooltip: switch (modo) {
+        YtRepeticion.ninguna => 'Repetir: desactivado',
+        YtRepeticion.cola => 'Repetir: toda la cola',
+        YtRepeticion.pista => 'Repetir: esta canción',
+      },
+      onPressed: player.alternarRepeticion,
+    );
   }
 }
 

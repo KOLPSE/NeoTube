@@ -18,6 +18,7 @@ class YtAcciones {
     required this.api,
     required this.player,
     required this.abrir,
+    this.abrirArtista,
   });
 
   final YtMusicApi api;
@@ -26,6 +27,12 @@ class YtAcciones {
   /// Navegar al detalle de una lista o un álbum. Lo resuelve el shell, que es
   /// quien tiene la pila de navegación.
   final void Function(YtItem) abrir;
+
+  /// Navegar a la página de un artista. Opcional para que los tests que solo
+  /// comprueban qué pasa al pulsar una canción o una lista no tengan que
+  /// montar una pila de navegación entera; sin él, un artista avisa en vez de
+  /// abrir nada.
+  final void Function(YtItem)? abrirArtista;
 
   /// El tap normal: una canción suena; una lista o un álbum se abren.
   Future<void> pulsar(
@@ -37,8 +44,19 @@ class YtAcciones {
       await reproducirCancion(context, item.comoPista!, hermanas: hermanas);
       return;
     }
-    if (item.tipo == YtTipo.artista) {
-      _avisar(context, 'Las páginas de artista todavía no están.');
+    // ⚠️ El artista va **antes** que la comprobación de `browseId`, y ahí está
+    // el fallo que esto arregla: un artista de la biblioteca sí trae
+    // `browseId` (un `MPLAUC…`), así que caía en la rama de abajo y se
+    // intentaba abrir como si fuera una lista — de donde salía el «No hay
+    // lista que abrir en este elemento» encima de una tarjeta que decía tener
+    // canciones.
+    if (item.esArtista) {
+      final ir = abrirArtista;
+      if (ir == null) {
+        _avisar(context, 'No se puede abrir la página de este artista.');
+      } else {
+        ir(item);
+      }
       return;
     }
     if (item.playlistId != null || item.browseId != null) {

@@ -162,6 +162,41 @@ void main() {
       expect(item.tipo, YtTipo.artista);
       // No tiene pistas propias ni lista que resolver: pulsarlo no reproduce.
       expect(item.esNavegable, isFalse);
+      expect(item.esArtista, isTrue);
+    });
+
+    // ⚠️ El caso que estaba roto. La pestaña "Tus artistas"
+    // (`FEmusic_library_corpus_track_artists`) **no** manda el `UC…` pelado:
+    // manda `MPLAUC…`. Sin reconocer ese prefijo la tarjeta caía en
+    // `YtTipo.desconocido` y, como sí trae `browseId`, `YtAcciones.pulsar` la
+    // mandaba a abrir como si fuera una lista — de ahí el «No hay lista que
+    // abrir en este elemento» al entrar a un artista de tu biblioteca.
+    // Comprobado contra la cuenta real con la sonda: los cinco artistas de la
+    // biblioteca llegan con `browseId: MPLAUC…`.
+    test('un artista de la biblioteca llega con MPLAUC y también es artista', () {
+      final j = unaColumna([
+        {
+          'musicShelfRenderer': {
+            'contents': [tarjeta(titulo: 'Avicii', browseId: 'MPLAUCuACQmW04T3v9Mz_1_suFYw')],
+          },
+        },
+      ]);
+      final item = api.seccionesDeRespuesta(j).single.items.single;
+      expect(item.tipo, YtTipo.artista);
+      expect(item.esArtista, isTrue);
+      // Y no se confunde con una lista: si `playlistId` saliera relleno,
+      // volvería a intentar abrirse como una colección.
+      expect(item.playlistId, isNull);
+    });
+
+    test('la página de un artista se pide por su UC, no por el MPLAUC', () {
+      // `MPLAUC…` responde, pero solo con lo que tienes en biblioteca de ese
+      // artista. La página completa (más escuchadas, álbumes, singles) es la
+      // del `UC…` que lleva dentro.
+      expect(YtMusicApi.browseIdDeArtista('MPLAUCuACQmW04T3v9Mz_1_suFYw'),
+          'UCuACQmW04T3v9Mz_1_suFYw');
+      expect(YtMusicApi.browseIdDeArtista('UCuACQmW04T3v9Mz_1_suFYw'),
+          'UCuACQmW04T3v9Mz_1_suFYw');
     });
 
     test('una canción suelta se convierte en pista reproducible', () {

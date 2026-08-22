@@ -102,6 +102,11 @@ class YtItem {
   bool get esNavegable =>
       esCancion || playlistId != null || (tipo == YtTipo.album && browseId != null);
 
+  /// ¿Lleva a una **página de artista**? Se mira aparte de [tipo] porque el
+  /// destino no es el mismo widget que el de una lista: lo abre
+  /// `YtArtistaScreen`, no `YtPlaylistScreen`.
+  bool get esArtista => tipo == YtTipo.artista && browseId != null;
+
   YtTrack? get comoPista => esCancion
       ? YtTrack(
           videoId: videoId!,
@@ -132,6 +137,8 @@ class YtColeccion {
     required this.subtitulo,
     required List<YtTrack> pistas,
     this.miniatura,
+    this.idParaGuardar,
+    this.guardada,
   }) : pistas = miniatura == null
             ? pistas
             : pistas.map((p) => p.conMiniatura(miniatura)).toList(growable: false);
@@ -140,4 +147,57 @@ class YtColeccion {
   final String subtitulo;
   final List<YtTrack> pistas;
   final String? miniatura;
+
+  /// El `playlistId` que hay que mandarle a `like/like` para meter este álbum
+  /// o esta lista en la biblioteca de la cuenta.
+  ///
+  /// ⚠️ **No es el `browseId` con el que se abrió.** Un álbum se abre por
+  /// `MPREb_…` pero se guarda por su `OLAK5uy_…`, y ese id solo aparece dentro
+  /// del `toggleButtonRenderer` de la cabecera. Mandar el `MPREb_…` no da
+  /// error: contesta 200 y no guarda nada, que es la peor forma de fallar.
+  /// `null` en lo que no se puede guardar (una mezcla `RD…` recién generada,
+  /// o una cabecera con otra forma).
+  final String? idParaGuardar;
+
+  /// Si ya está en la biblioteca, según el `isToggled` que manda la propia
+  /// cabecera. `null` cuando no hay botón que mirar — ahí el corazón sale
+  /// apagado, que es mejor que inventarse un estado.
+  final bool? guardada;
+}
+
+/// Una página de artista: la cabecera y sus secciones ("Canciones más
+/// escuchadas", "Álbumes", "Singles y EPs"…).
+///
+/// Las secciones son [YtSection] igual que las de la portada porque **son la
+/// misma forma**: `browse UC…` devuelve un `sectionListRenderer` con
+/// `musicShelfRenderer` y `musicCarouselShelfRenderer` dentro, exactamente lo
+/// que ya parsea `browseSections`. Lo único propio del artista es la cabecera.
+class YtArtista {
+  const YtArtista({
+    required this.nombre,
+    required this.secciones,
+    this.miniatura,
+    this.subtitulo = '',
+    this.descripcion,
+    this.playlistAleatorio,
+    this.playlistRadio,
+  });
+
+  final String nombre;
+  final List<YtSection> secciones;
+
+  /// El banner del artista (`musicImmersiveHeaderRenderer.thumbnail`). Llega
+  /// apaisado, no cuadrado: es una cabecera, no una carátula.
+  final String? miniatura;
+
+  /// Oyentes mensuales o suscriptores, tal cual lo manda Google ya traducido.
+  final String subtitulo;
+
+  final String? descripcion;
+
+  /// `RDAO…`: lo que reproduce el botón "Aleatorio" de la página oficial.
+  final String? playlistAleatorio;
+
+  /// `RDEM…`: el "Mix" del artista.
+  final String? playlistRadio;
 }

@@ -9,6 +9,56 @@ import '../core/yt_player.dart';
 import 'art_image.dart';
 import 'yt_acciones.dart';
 
+/// El corazón que mete un álbum o una lista **ajenos** en tu biblioteca.
+///
+/// Va en la cabecera y no en cada tarjeta de los carruseles a propósito: si
+/// está guardado o no lo dice el `isToggled` que viene **dentro de la
+/// respuesta de la colección** (ver `YtColeccionesGuardadas`), y una tarjeta
+/// de un carrusel no trae ese dato. Un corazón en cada tarjeta saldría siempre
+/// apagado hasta abrirla, incluidos los álbumes que ya tienes guardados — un
+/// botón que miente hasta que lo compruebas es peor que no tenerlo.
+class _BotonGuardarColeccion extends StatelessWidget {
+  const _BotonGuardarColeccion({
+    required this.guardadas,
+    required this.playlistId,
+    required this.esAlbum,
+  });
+
+  final YtColeccionesGuardadas guardadas;
+  final String playlistId;
+  final bool esAlbum;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final que = esAlbum ? 'álbum' : 'lista';
+    return AnimatedBuilder(
+      animation: guardadas,
+      builder: (context, _) {
+        final marcada = guardadas.estado(playlistId) ?? false;
+        final ocupada = guardadas.estaOcupada(playlistId);
+        return IconButton(
+          icon: Icon(marcada ? Icons.favorite : Icons.favorite_border),
+          color: marcada ? theme.colorScheme.primary : null,
+          iconSize: 26,
+          tooltip: marcada
+              ? 'Quitar este $que de tu biblioteca'
+              : 'Guardar este $que en tu biblioteca',
+          onPressed: ocupada
+              ? null
+              : () async {
+                  final ok = await guardadas.alternar(playlistId);
+                  if (ok || !context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('No se pudo guardar el $que.')),
+                  );
+                },
+        );
+      },
+    );
+  }
+}
+
 /// El contenido de una lista, un álbum o una mezcla: cabecera con carátula,
 /// botón de reproducir todo y las pistas en orden.
 ///
@@ -22,6 +72,7 @@ class YtPlaylistScreen extends StatefulWidget {
     required this.api,
     required this.player,
     required this.favoritos,
+    required this.guardadas,
     required this.onVolver,
   });
 
@@ -29,6 +80,11 @@ class YtPlaylistScreen extends StatefulWidget {
   final YtMusicApi api;
   final YtPlayer player;
   final YtFavoritos favoritos;
+
+  /// Qué álbumes y listas están en la biblioteca de la cuenta, para el corazón
+  /// de la cabecera.
+  final YtColeccionesGuardadas guardadas;
+
   final VoidCallback onVolver;
 
   @override
@@ -141,6 +197,13 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
         .listen(
       (c) {
         if (!mounted) return;
+        // El `isToggled` del botón de marcador viene dentro de esta misma
+        // respuesta: es la única forma de saber si un álbum está guardado sin
+        // pedir nada aparte. Ver `YtColeccionesGuardadas`.
+        final id = c.idParaGuardar;
+        if (id != null && c.guardada != null) {
+          widget.guardadas.sembrar(id, c.guardada!);
+        }
         setState(() {
           _coleccion = c;
           _cargando = false;
@@ -288,22 +351,42 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
             final fila = ListTile(
               dense: true,
               selected: activa,
+              // Número **y** carátula.
+              //
+              // ⚠️ Aquí antes solo había el número, y ese era el fallo de "no
+              // se ven las carátulas dentro de Música que me gusta, y tampoco
+              // en los álbumes de terceros": las dos cosas se abren en esta
+              // misma pantalla. En un álbum se nota menos —todas las pistas
+              // comparten la portada que ya está arriba—, pero en una lista
+              // mezclada cada canción tiene la suya y sin ella las filas son
+              // un muro de texto.
+              //
+              // Las pistas de un álbum no traen miniatura propia y heredan la
+              // de la colección en el constructor de `YtColeccion` (ver
+              // `YtTrack.conMiniatura`), así que aquí siempre hay algo que
+              // pintar.
               leading: SizedBox(
-                width: 44,
+                width: 76,
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
-                    if (widget.player.resolviendo == t.videoId)
-                      const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                    else if (activa)
-                      Icon(Icons.graphic_eq, size: 18, color: theme.colorScheme.primary)
-                    else
-                      Text('$i',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                    SizedBox(
+                      width: 24,
+                      child: widget.player.resolviendo == t.videoId
+                          ? const Center(
+                              child: SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2)))
+                          : activa
+                              ? Icon(Icons.graphic_eq,
+                                  size: 16, color: theme.colorScheme.primary)
+                              : Text('$i',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.onSurfaceVariant)),
+                    ),
+                    const SizedBox(width: 8),
+                    ArtImage(url: t.miniatura, size: 44, radius: 4),
                   ],
                 ),
               ),
@@ -394,6 +477,14 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
                       icon: const Icon(Icons.shuffle),
                       label: const Text('Aleatorio'),
                     ),
+                    if (c.idParaGuardar != null) ...[
+                      const SizedBox(width: 4),
+                      _BotonGuardarColeccion(
+                        guardadas: widget.guardadas,
+                        playlistId: c.idParaGuardar!,
+                        esAlbum: widget.item.tipo == YtTipo.album,
+                      ),
+                    ],
                   ],
                 ),
               ],
