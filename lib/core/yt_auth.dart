@@ -70,6 +70,12 @@ class YtAuth {
   /// sesión"; firmando con `SAPISID`, devuelve las playlists.
   static const _nombresDeFirma = ['SAPISID', '__Secure-3PAPISID', '__Secure-1PAPISID'];
 
+  /// Perfil de WebView2 en disco. **Tiene que ser escribible por el usuario**:
+  /// el default del paquete (`webview_window_WebView2` junto al .exe) falla en
+  /// instalaciones bajo Program Files y deja la ventana en blanco.
+  static String get _webviewUserDataDir =>
+      p.join(appDataDir().path, 'webview2');
+
   String? get _sapisid {
     for (final nombre in _nombresDeFirma) {
       for (final c in _cookies) {
@@ -186,13 +192,63 @@ class YtAuth {
           'No hay motor de WebView disponible (falta el WebView2 Runtime en Windows, '
           'o WebKitGTK en Linux).');
     }
+
+    final userData = Directory(_webviewUserDataDir);
+    if (!await userData.exists()) {
+      await userData.create(recursive: true);
+    }
+
     final webview = await WebviewWindow.create(
-      configuration: const CreateConfiguration(
+      configuration: CreateConfiguration(
         title: 'Iniciar sesión en YouTube Music',
         windowWidth: 480,
         windowHeight: 700,
+        userDataFolderWindows: userData.path,
       ),
     );
+
+    final completer = Completer<void>();
+    var capturando = false;
+
+    Future<void> intentarCapturar({required bool desdeUrlMusic}) async {
+      if (completer.isCompleted || capturando) return;
+      capturando = true;
+      try {
+        if (!desdeUrlMusic) {
+          try {
+            final href = await webview.evaluateJavaScript('location.href') ?? '';
+            if (!href.contains('music.youtube.com')) return;
+          } catch (_) {
+            return;
+          }
+        }
+        final cookies = _paraYoutube(await webview.getAllCookies());
+        if (!_sirvenParaFirmar(cookies)) return;
+        _cookies = cookies;
+        await _persist();
+        webview.close();
+        if (!completer.isCompleted) completer.complete();
+      } finally {
+        capturando = false;
+      }
+    }
+
+    unawaited(webview.onClose.then((_) {
+      if (!completer.isCompleted) {
+        completer.completeError(YtAuthException('Se cerró la ventana antes de iniciar sesión.'));
+      }
+    }));
+
+    // Callback **antes** de launch: en Windows el plugin avisa de cada URL
+    // (parche NeoTube: sin cancelar la navegación). Igual que InnerTune, el
+    // login se da por bueno al llegar a music.youtube.com.
+    webview.setOnUrlRequestCallback((url) {
+      if (!completer.isCompleted && url.startsWith('https://music.youtube.com')) {
+        unawaited(intentarCapturar(desdeUrlMusic: true));
+      }
+      return true;
+    });
+
     // Mismo punto de entrada que usa InnerTune (`ltmpl=music&service=youtube`
     // con el `continue` apuntando al signin de YouTube, que a su vez acaba en
     // music.youtube.com): entrar ya por accounts.google.com con esta forma
@@ -204,35 +260,18 @@ class YtAuth {
       '%26next%3Dhttps%253A%252F%252Fmusic.youtube.com%252F',
     );
 
-    final completer = Completer<void>();
-    unawaited(webview.onClose.then((_) {
-      if (!completer.isCompleted) {
-        completer.completeError(YtAuthException('Se cerró la ventana antes de iniciar sesión.'));
-      }
-    }));
-
-    // Igual que InnerTune: el login se da por bueno cuando la navegación
-    // llega a music.youtube.com, no sondeando cookies a ciegas — esa fue la
-    // pieza que faltaba, sondear solo decía si Google ya había puesto la
-    // cookie, no si el usuario había terminado de verdad.
-    webview.setOnUrlRequestCallback((url) {
-      if (!completer.isCompleted && url.startsWith('https://music.youtube.com')) {
-        unawaited(() async {
-          final cookies = _paraYoutube(await webview.getAllCookies());
-          if (_sirvenParaFirmar(cookies)) {
-            _cookies = cookies;
-            await _persist();
-            webview.close();
-            if (!completer.isCompleted) completer.complete();
-          }
-        }());
-      }
-      return true;
+    // Respaldo: si el aviso de URL se pierde, sondear ubicación + cookies.
+    final sonda = Timer.periodic(const Duration(seconds: 1), (_) {
+      unawaited(intentarCapturar(desdeUrlMusic: false));
     });
 
-    await completer.future.timeout(
-      const Duration(minutes: 5),
-      onTimeout: () => throw YtAuthException('Se agotó el tiempo esperando el login.'),
-    );
+    try {
+      await completer.future.timeout(
+        const Duration(minutes: 5),
+        onTimeout: () => throw YtAuthException('Se agotó el tiempo esperando el login.'),
+      );
+    } finally {
+      sonda.cancel();
+    }
   }
 }

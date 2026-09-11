@@ -1,7 +1,7 @@
 name: neotube
 description: "Cliente nativo de YouTube Music para escritorio (Flutter + media_kit)"
 publish_to: 'none'
-version: 1.1.0+1
+version: 1.1.1+1
 
 environment:
   sdk: ^3.12.2
@@ -33,7 +33,11 @@ dependencies:
   media_kit_libs_linux: ^1.2.1
   # El login es una WebView de verdad: Google no da API de terceros y hay que
   # quedarse con las cookies de una sesion real.
-  desktop_webview_window: ^0.3.0
+  # Fork local: en Windows el 0.3.0 de pub cancelaba cada navegacion y la
+  # relanzaba (pagina vacia con el login actual de Google) y el UA de WebView2
+  # delataba el motor embebido. Ver packages/desktop_webview_window.
+  desktop_webview_window:
+    path: packages/desktop_webview_window
 dev_dependencies:
   flutter_test:
     sdk: flutter

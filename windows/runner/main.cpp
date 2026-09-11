@@ -13,6 +13,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     CreateAndAttachConsole();
   }
 
+  // WebView2 (login de Google) lee esto al crear el entorno. No pisamos un
+  // valor que el usuario ya traiga. ThirdPartyStoragePartitioning parte a
+  // medias el flujo de accounts.google.com dentro de WebViews embebidos.
+  if (::GetEnvironmentVariableW(L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                                nullptr, 0) == 0 &&
+      ::GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
+    ::SetEnvironmentVariableW(
+        L"WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+        L"--disable-features=ThirdPartyStoragePartitioning");
+  }
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
   ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);

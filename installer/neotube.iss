@@ -81,6 +81,8 @@ Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM neotube.exe"; Flags: runhidd
 ; ocupando disco tras desinstalar. Las cookies y configuración NO se tocan
 ; aquí a propósito: si el usuario reinstala, conservará su sesión.
 Type: filesandordirs; Name: "{userappdata}\neotube\art"
+; Perfil de WebView2 del login (ya no vive junto al .exe).
+Type: filesandordirs; Name: "{userappdata}\neotube\webview2"
 
 [Code]
 
