@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 ///
 /// Esta constante es la única fuente de verdad para el instalador y el
 /// actualizador.
-const String kVersion = '1.1.1';
+const String kVersion = '1.2.0';
 
 /// Repositorio de donde salen las actualizaciones.
 const String kRepoGitHub = 'KOLPSE/NeoTube';
@@ -108,6 +108,10 @@ class AppConfig {
   /// anterior — son copias desechables, se vuelven a bajar si hacen falta.
   String? rutaCacheContinuaciones;
 
+  /// Nombre con el que firma los reportes de errores a NeoHub. No hay cuentas:
+  /// viaja en cada envío y se puede cambiar en el formulario.
+  String nombreReporte;
+
   AppConfig({
     this.performanceMode = false,
     this.volumenNeoTube = 60,
@@ -115,6 +119,7 @@ class AppConfig {
     this.discordClientId = kDiscordClientId,
     this.limiteCacheContinuacionesMB = 300,
     this.rutaCacheContinuaciones,
+    this.nombreReporte = '',
   });
 
   static File get _file => File(p.join(appDataDir().path, 'config.json'));
@@ -131,6 +136,7 @@ class AppConfig {
         discordClientId: (map['discordClientId'] as String?) ?? kDiscordClientId,
         limiteCacheContinuacionesMB: (map['limiteCacheContinuacionesMB'] as int?) ?? 300,
         rutaCacheContinuaciones: map['rutaCacheContinuaciones'] as String?,
+        nombreReporte: map['nombreReporte'] as String? ?? '',
       );
     } catch (_) {
       return AppConfig();
@@ -145,6 +151,7 @@ class AppConfig {
       'discordClientId': discordClientId,
       'limiteCacheContinuacionesMB': limiteCacheContinuacionesMB,
       'rutaCacheContinuaciones': rutaCacheContinuaciones,
+      'nombreReporte': nombreReporte,
     }));
   }
 }

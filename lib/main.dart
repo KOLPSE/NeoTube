@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:desktop_webview_window/desktop_webview_window.dart';
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:window_manager/window_manager.dart';
 import 'core/app_config.dart';
 import 'core/art_cache.dart';
 import 'core/discord_rpc.dart';
+import 'core/log.dart';
 import 'core/media_keys.dart';
 import 'core/mpris.dart';
 import 'core/resource_monitor.dart';
@@ -24,6 +26,7 @@ import 'core/yt_player.dart';
 import 'core/yt_sesion.dart';
 import 'ui/atajos.dart';
 import 'ui/neotube_shell.dart';
+import 'ui/yt_theme.dart';
 
 const _lockPort = 53331;
 
@@ -31,7 +34,10 @@ const _lockPort = 53331;
 /// con una instancia existente de NeoTube.
 Future<bool> _instanciaUnica() async {
   try {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, _lockPort);
+    final server = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      _lockPort,
+    );
     server.listen((socket) {
       unawaited(socket.drain<void>().catchError((_) {}));
       unawaited(windowManager.show());
@@ -69,8 +75,9 @@ Future<void> main(List<String> args) async {
     MediaKit.ensureInitialized();
   } catch (e) {
     YtPlayer.libmpvDisponible = false;
-    // Esta cadena la comprueba el CI de Linux.
-    debugPrint('[NeoTube] sin libmpv, no se podra reproducir: $e');
+    // La cadena 'sin libmpv' la comprueba el CI de Linux (grep sobre la
+    // salida): Log la vuelca por consola también en release.
+    Log.e('sin libmpv, no se podrá reproducir', e);
   }
 
   if (!await _instanciaUnica()) exit(0);
@@ -100,10 +107,29 @@ Future<void> main(List<String> args) async {
   // **Esto no reproduce nada** — ver `SesionDeReproduccion`.
   final sesion = await SesionDeReproduccion.cargar();
 
-  runApp(NeoTubeApp(config: config, auth: auth, sesion: sesion));
+  _instalarManejadoresDeErrores();
+
+  runZonedGuarded(
+    () => runApp(NeoTubeApp(config: config, auth: auth, sesion: sesion)),
+    (error, stack) => Log.e('Error de zona', error, stack),
+  );
 }
 
-const _seedNeoTube = Color(0xFFE53935);
+/// Todo lo que revienta sin un `catch` propio acaba aquí y en el fichero de
+/// log: así un fallo se puede adjuntar a un reporte de NeoHub en vez de
+/// perderse en la consola.
+void _instalarManejadoresDeErrores() {
+  FlutterError.onError = (FlutterErrorDetails detalles) {
+    // `detalles.toString()` incluye el "widget que causa el error", que es lo
+    // que permite localizar un overflow de layout; `detalles.exception` solo
+    // trae la primera línea.
+    Log.e('Error de Flutter', detalles.toString(), detalles.stack);
+  };
+  PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+    Log.e('Error sin gestionar', error, stack);
+    return true;
+  };
+}
 
 class NeoTubeApp extends StatelessWidget {
   const NeoTubeApp({
@@ -122,17 +148,11 @@ class NeoTubeApp extends StatelessWidget {
     return MaterialApp(
       title: 'NeoTube',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: _seedNeoTube),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: _seedNeoTube,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-      ),
+      // Tema exacto de YouTube Music, no un `fromSeed` genérico: el rojo de
+      // marca (#ff0033), el fondo (#0f0f0f en oscuro) y la Roboto salen de la
+      // CSS del propio sitio (ver `ui/yt_theme.dart`).
+      theme: ytTheme(Brightness.light),
+      darkTheme: ytTheme(Brightness.dark),
       themeMode: ThemeMode.system,
       // ⚠️ **Esto es lo que evita que la app se cierre sola al maximizar.**
       //
@@ -179,7 +199,8 @@ class _NeoTubeRoot extends StatefulWidget {
   State<_NeoTubeRoot> createState() => _NeoTubeRootState();
 }
 
-class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayListener {
+class _NeoTubeRootState extends State<_NeoTubeRoot>
+    with WindowListener, TrayListener {
   late final YtMusicApi _api = YtMusicApi(widget.auth);
   late final YtPlayer _player = YtPlayer(
     volumenInicial: widget.config.volumenNeoTube,
@@ -210,6 +231,7 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     if (_player.sonando) return;
     await _player.alternar();
   }
+
   Future<void> _saltarA(int ms) => _player.seek(Duration(milliseconds: ms));
 
   late final SmtcService _smtc = SmtcService(
@@ -237,13 +259,13 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
   );
 
   EstadoDelSistema _estadoParaElSistema() => EstadoDelSistema(
-        track: _player.actual,
-        sonando: _player.sonando,
-        posicionMs: _player.posicion.inMilliseconds,
-        puedeSaltar: _player.puedeSaltar,
-        puedeVolver: _player.puedeVolver,
-        volumen: _player.volumen,
-      );
+    track: _player.actual,
+    sonando: _player.sonando,
+    posicionMs: _player.posicion.inMilliseconds,
+    puedeSaltar: _player.puedeSaltar,
+    puedeVolver: _player.puedeVolver,
+    volumen: _player.volumen,
+  );
 
   DateTime _ultimoMando = DateTime.fromMillisecondsSinceEpoch(0);
   String? _ultimoMandoQue;
@@ -384,14 +406,14 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
     try {
       final icon = _trayIconPath();
       if (icon == null) {
-        debugPrint('Bandeja: no se encuentra el icono; la X cerrará la app.');
+        Log.w('Bandeja: no se encuentra el icono; la X cerrará la app.');
         return;
       }
       await trayManager.setIcon(icon);
       await _refreshTrayMenu();
       if (mounted) setState(() => _bandejaDisponible = true);
     } catch (e) {
-      debugPrint('Bandeja no disponible ($e); la X cerrará la app.');
+      Log.w('Bandeja no disponible ($e); la X cerrará la app.');
       return;
     }
 
@@ -416,10 +438,14 @@ class _NeoTubeRootState extends State<_NeoTubeRoot> with WindowListener, TrayLis
 
   Future<void> _refreshTrayMenu() async {
     try {
-      await trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: 'Mostrar NeoTube'),
-        MenuItem(key: 'exit', label: 'Salir'),
-      ]));
+      await trayManager.setContextMenu(
+        Menu(
+          items: [
+            MenuItem(key: 'show', label: 'Mostrar NeoTube'),
+            MenuItem(key: 'exit', label: 'Salir'),
+          ],
+        ),
+      );
     } catch (_) {}
   }
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'log.dart';
 import 'yt_models.dart';
 import 'yt_music_api.dart';
 
@@ -71,7 +72,7 @@ class YtFavoritos extends ChangeNotifier {
     } catch (e) {
       // Sin favoritos cargados los corazones salen vacíos, que es mejor que
       // no dejar usar el botón: darle like funciona igual.
-      debugPrint('[NeoTube favoritos] no se pudieron cargar: $e');
+      Log.w('favoritos: no se pudieron cargar: $e');
     } finally {
       _cargando = false;
     }
@@ -115,7 +116,7 @@ class YtFavoritos extends ChangeNotifier {
       }
       ultimoCambio = (pista: t, anadida: eraFavorita);
       revision++;
-      debugPrint('[NeoTube favoritos] no se pudo cambiar $id: $e');
+      Log.w('favoritos: no se pudo cambiar $id: $e');
       return false;
     } finally {
       _enVuelo.remove(id);
@@ -203,7 +204,7 @@ class YtColeccionesGuardadas extends ChangeNotifier {
       } else {
         _guardadas.remove(playlistId);
       }
-      debugPrint('[NeoTube biblioteca] no se pudo cambiar $playlistId: $e');
+      Log.w('biblioteca: no se pudo cambiar $playlistId: $e');
       return false;
     } finally {
       _enVuelo.remove(playlistId);

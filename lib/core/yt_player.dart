@@ -6,6 +6,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
 import 'app_config.dart' show AppConfig, rutaEfectivaDeCacheContinuaciones;
+import 'log.dart';
 import 'procesos.dart' show sufijoEjecutable;
 import 'yt_auth.dart';
 import 'yt_local_proxy.dart';
@@ -117,7 +118,7 @@ class YtPlayer extends ChangeNotifier {
     // de progreso de Discord, que sin duración no llega a dibujarse.
     _subDuracion = mpv.stream.duration.listen((_) => notifyListeners());
     _subError = mpv.stream.error.listen((e) {
-      debugPrint('NeoTube: libmpv informa de un error: $e '
+      Log.w('libmpv informa de un error: $e '
           '(abriendo=$_pistaAbriendo, reintentosHechos=$_reintentosHechos)');
       if (_pistaAbriendo != null && _reintentosHechos < _maxReintentos) {
         _reintentosHechos++;
@@ -570,7 +571,7 @@ class YtPlayer extends ChangeNotifier {
     } on YtStreamException catch (e) {
       if (!e.reintentarConYtDlp) throw YtPlayerException('$e');
       if (findYtDlpBinary() == null) throw YtPlayerException('$e');
-      debugPrint('NeoTube: la vía rápida falló ($e). Probando con yt-dlp.');
+      Log.w('la vía rápida falló ($e). Probando con yt-dlp.');
       return _resolverConYtDlp(videoId);
     }
   }
@@ -595,7 +596,7 @@ class YtPlayer extends ChangeNotifier {
     final res = await _ejecutar(bin.path, args);
     if (res.exitCode != 0) {
       final stderr = '${res.stderr}';
-      debugPrint('NeoTube: yt-dlp falló (exit ${res.exitCode}):\n$stderr');
+      Log.w('yt-dlp falló (exit ${res.exitCode}):\n$stderr');
       throw YtPlayerException(_motivoDeFalloYtDlp(stderr));
     }
     final url = (res.stdout as String).trim().split('\n').first.trim();
@@ -640,7 +641,7 @@ class YtPlayer extends ChangeNotifier {
   Future<File?> _conseguirContinuacion(String videoId) async {
     final yaEsta = await _continuacionEnDisco(videoId);
     if (yaEsta != null) {
-      debugPrint('NeoTube: $videoId ya estaba en la caché de repuesto');
+      Log.d('$videoId ya estaba en la caché de repuesto');
       return yaEsta;
     }
     await Future<void>.delayed(_retrasoContinuacion);
@@ -746,11 +747,11 @@ class YtPlayer extends ChangeNotifier {
       if (codigo != 0 || !destino.existsSync()) {
         // Sin copia de repuesto: no hay nada que enseñar como "a salvo".
         _fijarProgresoDescarga(videoId, null);
-        debugPrint('NeoTube: descarga completa de $videoId falló '
+        Log.w('descarga completa de $videoId falló '
             '(exit $codigo): $erroresDeSalida');
         return null;
       }
-      debugPrint('NeoTube: descarga completa de $videoId lista '
+      Log.d('descarga completa de $videoId lista '
           '(${destino.lengthSync()} bytes)');
       // A 1.0 y ahí se queda: el tramo descargado se enseña el resto de la
       // canción, no un instante — es justo la parte útil de saber que ya
@@ -762,7 +763,7 @@ class YtPlayer extends ChangeNotifier {
       temporizadorProgreso?.cancel();
       _fijarProgresoDescarga(videoId, null);
       proceso?.kill();
-      debugPrint('NeoTube: descarga completa de $videoId lanzó: $e');
+      Log.w('descarga completa de $videoId lanzó: $e');
       return null;
     }
   }
@@ -811,7 +812,7 @@ class YtPlayer extends ChangeNotifier {
       } catch (e) {
         // Ruta inválida, unidad desconectada, sin permiso… Se cae a la de
         // por defecto en vez de perder la descarga de repuesto de la pista.
-        debugPrint('NeoTube: no se pudo usar la carpeta de caché elegida '
+        Log.w('no se pudo usar la carpeta de caché elegida '
             '($elegida): $e. Usando la de por defecto.');
       }
     }
@@ -989,7 +990,7 @@ class YtPlayer extends ChangeNotifier {
           ? await _continuacionEnDisco(t.videoId)
           : null;
       if (enCache != null) {
-        debugPrint('NeoTube: ${t.videoId} sale de la caché en '
+        Log.d('${t.videoId} sale de la caché en '
             '${reloj.elapsedMilliseconds}ms (sin red)');
         _continuaciones[t.videoId] = Future<File?>.value(enCache);
         await mpv.open(Media(enCache.path, start: desde));
@@ -1005,7 +1006,7 @@ class YtPlayer extends ChangeNotifier {
       // Una línea por cambio de pista, con el número que justifica todo este
       // fichero: si algún día vuelve a marcar segundos en vez de milisegundos,
       // es que se está cayendo al plan B en cada pista y nadie se ha enterado.
-      debugPrint('NeoTube: ${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
+      Log.d('${t.videoId} resuelto en ${reloj.elapsedMilliseconds}ms');
       _iniciarContinuacionConRetraso(t.videoId);
       final urlLocal = await _proxy.exponer(
         url,
@@ -1020,7 +1021,7 @@ class YtPlayer extends ChangeNotifier {
       // Sin esto, una pista que no arranca no deja **ni una línea** en el log:
       // el error acaba en `error` y de ahí a la interfaz, y quien mira la
       // consola no ve nada de nada. Es exactamente cómo se perdió una tarde.
-      debugPrint('NeoTube: no se pudo abrir ${t.videoId}: $e\n$pila');
+      Log.e('no se pudo abrir ${t.videoId}', e, pila);
       _pistaAbriendo = null;
       error = '$e';
       rethrow;
@@ -1056,7 +1057,7 @@ class YtPlayer extends ChangeNotifier {
       final urlFresca = findYtDlpBinary() != null
           ? await _resolverConYtDlp(t.videoId)
           : await _resolverUrl(t.videoId);
-      debugPrint('NeoTube: reintento de ${t.videoId} por '
+      Log.i('reintento de ${t.videoId} por '
           '${findYtDlpBinary() != null ? 'yt-dlp' : 'la vía rápida'}');
       // Si el usuario saltó a otra pista mientras se resolvía la URL fresca,
       // no abrimos ni modificamos el estado de la pista nueva.
@@ -1102,13 +1103,13 @@ class YtPlayer extends ChangeNotifier {
       if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
       return;
     }
-    debugPrint('NeoTube: retomando ${t.videoId} desde $posicion tras el corte');
+    Log.i('retomando ${t.videoId} desde $posicion tras el corte');
     _cambiando = true;
     notifyListeners();
     try {
       await _mpv?.open(Media(archivo.path, start: posicion));
     } catch (e) {
-      debugPrint('NeoTube: no se pudo retomar ${t.videoId}: $e');
+      Log.w('no se pudo retomar ${t.videoId}: $e');
       if (actual?.videoId == t.videoId && cola.isNotEmpty) {
         unawaited(siguiente(automatico: true));
       }

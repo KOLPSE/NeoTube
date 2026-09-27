@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'log.dart';
 import 'sistema.dart';
 
 export 'sistema.dart' show EstadoDelSistema;
@@ -125,7 +125,7 @@ class SmtcService {
     } on MissingPluginException {
       // El runner no implementa el canal (tests o compilaciones previas).
     } on PlatformException catch (error) {
-      debugPrint('Controles del sistema: $error');
+      Log.w('Controles del sistema: $error');
     }
   }
 }

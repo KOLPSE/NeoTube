@@ -97,28 +97,57 @@ class YtAcciones {
       // se encarga de mostrarlo siempre, aunque este widget se haya desmontado.
       return;
     }
-    unawaited(api.radioDe(t.videoId).then((radio) {
-      // Solo si sigue sonando la misma: si el usuario ya cambió de canción,
-      // engancharle la radio de la anterior sería sabotear su cola.
-      if (player.actual?.videoId == t.videoId) player.anexar(radio);
-    }).catchError((_) {}));
+    unawaited(
+      api
+          .radioDe(t.videoId)
+          .then((radio) {
+            // Solo si sigue sonando la misma: si el usuario ya cambió de canción,
+            // engancharle la radio de la anterior sería sabotear su cola.
+            if (player.actual?.videoId == t.videoId) player.anexar(radio);
+          })
+          .catchError((_) {}),
+    );
   }
 
   /// Reproducir una lista o un álbum de principio a fin.
   Future<void> reproducirColeccion(BuildContext context, YtItem item) async {
     try {
-      final c = await api.coleccion(playlistId: item.playlistId, browseId: item.browseId);
+      final c = await api.coleccion(
+        playlistId: item.playlistId,
+        browseId: item.browseId,
+      );
       if (c.pistas.isEmpty) {
-        if (context.mounted) _avisar(context, 'Esta lista no tiene canciones que reproducir.');
+        if (context.mounted) {
+          _avisar(context, 'Esta lista no tiene canciones que reproducir.');
+        }
         return;
       }
-      await player.reproducirLista(c.pistas, contexto: item.playlistId ?? item.browseId);
+      await player.reproducirLista(
+        c.pistas,
+        contexto: item.playlistId ?? item.browseId,
+      );
     } catch (e) {
       // Si el error fue al reproducir la pista dentro de la lista, ya lo
       // gestiona player.error y el shell. Si fue al traer la lista de la API:
       if (player.error == null && context.mounted) {
         _avisar(context, 'No se pudo reproducir la lista: $e');
       }
+    }
+  }
+
+  /// "Reproducir todo" de una sección de la portada: suena todo lo que sea
+  /// canción, en el orden en que aparece. Las listas y álbumes de la sección
+  /// no se abren aquí — reproducir una colección es otra acción.
+  Future<void> reproducirTodo(List<YtItem> items) async {
+    final pistas = items
+        .where((it) => it.esCancion && it.comoPista != null)
+        .map((it) => it.comoPista!)
+        .toList();
+    if (pistas.isEmpty) return;
+    try {
+      await player.reproducirLista(pistas);
+    } catch (_) {
+      // El error queda en player.error y lo enseña el shell.
     }
   }
 
@@ -133,12 +162,12 @@ class YtAcciones {
 /// y una canción se ven idénticas y no hay forma de saber cuál va a sonar y
 /// cuál va a abrirse.
 IconData iconoDe(YtTipo tipo) => switch (tipo) {
-      YtTipo.cancion => Icons.play_arrow,
-      YtTipo.lista => Icons.queue_music,
-      YtTipo.album => Icons.album,
-      YtTipo.artista => Icons.person,
-      YtTipo.desconocido => Icons.more_horiz,
-    };
+  YtTipo.cancion => Icons.play_arrow,
+  YtTipo.lista => Icons.queue_music,
+  YtTipo.album => Icons.album,
+  YtTipo.artista => Icons.person,
+  YtTipo.desconocido => Icons.more_horiz,
+};
 
 String formatoDuracion(Duration d) {
   final h = d.inHours;

@@ -2,8 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dbus/dbus.dart';
-import 'package:flutter/foundation.dart';
 
+import 'log.dart';
 import 'sistema.dart';
 import 'yt_models.dart';
 
@@ -57,7 +57,7 @@ class MprisService {
       _cliente = cliente;
       _objeto = objeto;
     } catch (e) {
-      debugPrint('MPRIS no disponible: $e');
+      Log.w('MPRIS no disponible: $e');
       await stop();
     }
   }
@@ -226,7 +226,7 @@ class _ObjetoMpris extends DBusObject {
       return DBusMethodErrorResponse.unknownInterface();
     }
 
-    debugPrint('MPRIS: ${call.name} <- ${call.sender}');
+    Log.d('MPRIS: ${call.name} <- ${call.sender}');
 
     switch (call.name) {
       case 'PlayPause':

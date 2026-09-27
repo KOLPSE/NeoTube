@@ -14,16 +14,16 @@ import '../core/yt_player.dart';
 import 'art_image.dart';
 import 'settings_dialog.dart';
 import 'yt_acciones.dart';
-import 'yt_ajustes.dart';
 import 'yt_artista_screen.dart';
 import 'yt_browse_screen.dart';
 import 'yt_login_screen.dart';
 import 'yt_playlist_screen.dart';
 import 'yt_search_screen.dart';
+import 'yt_theme.dart';
 
-/// El shell de NeoTube: misma disposición que `AppShell` (barra lateral de
-/// 244 px + contenido + barra inferior), navegación al estilo Metrolist.
-enum _NeoTubeView { inicio, explorar, biblioteca, buscar, cola }
+/// El shell de NeoTube: barra superior (logo + buscador), barra lateral de
+/// navegación, contenido y barra de reproducción abajo, como YouTube Music.
+enum _NeoTubeView { inicio, explorar, biblioteca, buscar, cola, ajustes }
 
 class NeoTubeShell extends StatefulWidget {
   const NeoTubeShell({
@@ -59,6 +59,13 @@ class NeoTubeShell extends StatefulWidget {
 class _NeoTubeShellState extends State<NeoTubeShell> {
   _NeoTubeView _view = _NeoTubeView.inicio;
 
+  /// Si la barra lateral está contraída a la guía de iconos (72 px) o abierta
+  /// con sus etiquetas. La hamburguesa la conmuta, como en la web.
+  bool _sidebarColapsada = false;
+
+  void _alternarSidebar() =>
+      setState(() => _sidebarColapsada = !_sidebarColapsada);
+
   /// Lo que hay abierto encima de la pestaña actual: listas, álbumes y páginas
   /// de artista, en el orden en que se entró.
   ///
@@ -71,12 +78,18 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
   // Un store por pestaña, creado una vez y no en cada `_content()`: así no se
   // repite la carga cada vez que se cambia de pestaña y se vuelve.
   late final YtHomeStore _inicio = YtHomeStore(
-      ({bool forzar = false}) => widget.api.browseSections(YtMusicApi.browseIdInicio, forzar: forzar));
+    ({bool forzar = false}) =>
+        widget.api.browseSections(YtMusicApi.browseIdInicio, forzar: forzar),
+  );
   late final YtHomeStore _explorar = YtHomeStore(
-      ({bool forzar = false}) => widget.api.browseSections(YtMusicApi.browseIdExplorar, forzar: forzar));
+    ({bool forzar = false}) =>
+        widget.api.browseSections(YtMusicApi.browseIdExplorar, forzar: forzar),
+  );
   // La biblioteca no es un `browseId`, son cuatro: playlists, álbumes,
   // canciones y artistas viven en endpoints distintos.
-  late final YtHomeStore _biblioteca = YtHomeStore.progresivo(widget.api.bibliotecaProgresiva);
+  late final YtHomeStore _biblioteca = YtHomeStore.progresivo(
+    widget.api.bibliotecaProgresiva,
+  );
 
   late final YtAcciones _acciones = YtAcciones(
     api: widget.api,
@@ -86,13 +99,29 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
   );
 
   late final YtFavoritos _favoritos = YtFavoritos(widget.api);
-  late final YtColeccionesGuardadas _guardadas = YtColeccionesGuardadas(widget.api);
+  late final YtColeccionesGuardadas _guardadas = YtColeccionesGuardadas(
+    widget.api,
+  );
 
   void _apilar(YtItem item) => setState(() => _pila.add(item));
 
   void _volver() => setState(() {
-        if (_pila.isNotEmpty) _pila.removeLast();
-      });
+    if (_pila.isNotEmpty) _pila.removeLast();
+  });
+
+  /// La consulta que se escribe en la barra superior.
+  final TextEditingController _busqueda = TextEditingController();
+
+  /// La última consulta pedida desde la barra superior. La pantalla de buscar
+  /// se suscribe a esto: cada Intro en la barra dispara una búsqueda nueva.
+  final ValueNotifier<String?> _peticionDeBusqueda = ValueNotifier(null);
+
+  void _buscarDesdeLaBarra(String consulta) {
+    final limpia = consulta.trim();
+    if (limpia.isEmpty) return;
+    _peticionDeBusqueda.value = limpia;
+    _irA(_NeoTubeView.buscar);
+  }
 
   String? _ultimoError;
 
@@ -122,6 +151,8 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     _inicio.dispose();
     _explorar.dispose();
     _biblioteca.dispose();
+    _busqueda.dispose();
+    _peticionDeBusqueda.dispose();
     super.dispose();
   }
 
@@ -147,36 +178,43 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
   }
 
   void _irA(_NeoTubeView v) => setState(() {
-        _view = v;
-        _pila.clear();
-      });
+    _view = v;
+    _pila.clear();
+  });
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
+      body: Column(
         children: [
-          // Escucha al reproductor: "En cola" aparece en cuanto hay algo
-          // que enseñar, sin esperar a que algo más redibuje el shell.
-          AnimatedBuilder(
-            animation: widget.player,
-            builder: (context, _) => _Sidebar(
-              view: _view,
-              hayCola: widget.player.cola.isNotEmpty,
-              onSelectView: _irA,
-              onLogout: widget.auth.isLoggedIn ? widget.onLogout : null,
-              ram: widget.ram,
-              settings: widget.settings,
-              updater: widget.updater,
-              onSalirParaActualizar: widget.onSalirParaActualizar,
+          _BarraSuperior(controlador: _busqueda, onBuscar: _buscarDesdeLaBarra),
+          Expanded(
+            child: Row(
+              children: [
+                // Escucha al reproductor: "En cola" aparece en cuanto hay algo
+                // que enseñar, sin esperar a que algo más redibuje el shell.
+                AnimatedBuilder(
+                  animation: widget.player,
+                  builder: (context, _) => _Sidebar(
+                    view: _view,
+                    hayCola: widget.player.cola.isNotEmpty,
+                    colapsada: _sidebarColapsada,
+                    onToggle: _alternarSidebar,
+                    onSelectView: _irA,
+                    onLogout: widget.auth.isLoggedIn ? widget.onLogout : null,
+                  ),
+                ),
+                const VerticalDivider(width: 1),
+                Expanded(child: _content()),
+              ],
             ),
           ),
-          const VerticalDivider(width: 1),
-          Expanded(child: _content()),
         ],
       ),
-      bottomNavigationBar:
-          _BarraInferior(player: widget.player, favoritos: _favoritos),
+      bottomNavigationBar: _BarraInferior(
+        player: widget.player,
+        favoritos: _favoritos,
+      ),
     );
   }
 
@@ -188,14 +226,19 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     // Nada de esto sirve sin sesión, así que el login se antepone a la
     // navegación en vez de repetirlo en cada pestaña.
     if (!widget.auth.isLoggedIn) {
-      return YtLoginScreen(auth: widget.auth, onLoggedIn: () async => setState(() {}));
+      return YtLoginScreen(
+        auth: widget.auth,
+        onLoggedIn: () async => setState(() {}),
+      );
     }
     if (_pila.isNotEmpty) {
       final abierto = _pila.last;
       // La clave evita que al abrir otra lista se reutilice el estado (y las
       // pistas) de la anterior mientras carga la nueva.
-      final clave = ValueKey('${_pila.length}:'
-          '${abierto.playlistId ?? abierto.browseId}');
+      final clave = ValueKey(
+        '${_pila.length}:'
+        '${abierto.playlistId ?? abierto.browseId}',
+      );
       if (abierto.esArtista) {
         return YtArtistaScreen(
           key: clave,
@@ -218,29 +261,39 @@ class _NeoTubeShellState extends State<NeoTubeShell> {
     }
     return switch (_view) {
       _NeoTubeView.inicio => YtBrowseScreen(
-          key: const PageStorageKey('inicio'),
-          store: _inicio,
-          player: widget.player,
-          acciones: _acciones,
-          tituloVacio: 'No se ha podido traer la portada todavía.',
-        ),
+        key: const PageStorageKey('inicio'),
+        store: _inicio,
+        player: widget.player,
+        acciones: _acciones,
+        tituloVacio: 'No se ha podido traer la portada.',
+      ),
       _NeoTubeView.explorar => YtBrowseScreen(
-          key: const PageStorageKey('explorar'),
-          store: _explorar,
-          player: widget.player,
-          acciones: _acciones,
-          tituloVacio: 'No se ha podido traer nada para explorar todavía.',
-        ),
+        key: const PageStorageKey('explorar'),
+        store: _explorar,
+        player: widget.player,
+        acciones: _acciones,
+        tituloVacio: 'No se ha podido traer nada para explorar.',
+      ),
       _NeoTubeView.biblioteca => YtBrowseScreen(
-          key: const PageStorageKey('biblioteca'),
-          store: _biblioteca,
-          player: widget.player,
-          acciones: _acciones,
-          tituloVacio: 'Tu biblioteca está vacía, o no se ha podido traer.',
-        ),
-      _NeoTubeView.buscar =>
-        YtSearchScreen(api: widget.api, player: widget.player, acciones: _acciones),
+        key: const PageStorageKey('biblioteca'),
+        store: _biblioteca,
+        player: widget.player,
+        acciones: _acciones,
+        tituloVacio: 'Tu biblioteca está vacía, o no se ha podido traer.',
+      ),
+      _NeoTubeView.buscar => YtSearchScreen(
+        api: widget.api,
+        player: widget.player,
+        acciones: _acciones,
+        peticionExterna: _peticionDeBusqueda,
+      ),
       _NeoTubeView.cola => _ColaScreen(player: widget.player),
+      _NeoTubeView.ajustes => YtAjustesScreen(
+        monitor: widget.ram,
+        settings: widget.settings,
+        updater: widget.updater,
+        onSalirParaActualizar: widget.onSalirParaActualizar,
+      ),
     };
   }
 }
@@ -264,23 +317,31 @@ class _SinLibmpv extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.volume_off_outlined,
-                  size: 48, color: theme.colorScheme.onSurfaceVariant),
+              Icon(
+                Icons.volume_off_outlined,
+                size: 48,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
               const SizedBox(height: 16),
-              Text('NeoTube no puede reproducir audio',
-                  style: theme.textTheme.titleMedium, textAlign: TextAlign.center),
+              Text(
+                'NeoTube no puede reproducir audio',
+                style: theme.textTheme.titleMedium,
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 12),
               Text(
                 YtPlayer.motivoSinLibmpv,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 16),
               Text(
                 'Sin libmpv NeoTube no puede emitir ningún sonido.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -291,105 +352,168 @@ class _SinLibmpv extends StatelessWidget {
   }
 }
 
+/// El logotipo de YouTube Music: el círculo rojo con el triángulo de play y la
+/// palabra "Music", como en la esquina superior izquierda de la web.
+class _LogoDeYtMusic extends StatelessWidget {
+  const _LogoDeYtMusic();
+
+  @override
+  Widget build(BuildContext context) {
+    return const YtMusicLogo();
+  }
+}
+
+/// La barra superior, como en YouTube Music: la caja de búsqueda. El logo vive
+/// en el encabezado de la barra lateral, y aquí no hay iconos de adorno.
+class _BarraSuperior extends StatelessWidget {
+  const _BarraSuperior({required this.controlador, required this.onBuscar});
+
+  final TextEditingController controlador;
+  final ValueChanged<String> onBuscar;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surface,
+      child: SizedBox(
+        height: 64,
+        child: Row(
+          children: [
+            const SizedBox(width: 24),
+            Expanded(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: TextField(
+                  controller: controlador,
+                  onSubmitted: onBuscar,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar canciones, álbumes, artistas o podcasts',
+                    prefixIcon: Icon(Icons.search),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 24),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _Sidebar extends StatelessWidget {
   const _Sidebar({
     required this.view,
     required this.hayCola,
+    required this.colapsada,
+    required this.onToggle,
     required this.onSelectView,
-    required this.ram,
-    required this.settings,
-    required this.updater,
-    required this.onSalirParaActualizar,
     this.onLogout,
   });
 
   final _NeoTubeView view;
   final bool hayCola;
+  final bool colapsada;
+  final VoidCallback onToggle;
   final void Function(_NeoTubeView) onSelectView;
   final Future<void> Function()? onLogout;
-  final ResourceMonitor ram;
-  final Settings settings;
-  final Updater updater;
-  final Future<void> Function() onSalirParaActualizar;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 244,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 200),
+      curve: Curves.easeOutCubic,
+      width: colapsada ? 72 : 240,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 16, 16, 8),
-            child: Text('NeoTube', style: Theme.of(context).textTheme.titleLarge),
+          // Encabezado: hamburguesa en una columna FIJA de 72 px (siempre
+          // centrada) y el logo "Music" fundido en un `Expanded`. La columna no
+          // anima su ancho: solo lo hace el sidebar entero, así la hamburguesa
+          // se queda quieta y centrada y no hay nada que desborde a mitad de la
+          // transición.
+          SizedBox(
+            height: 56,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 72,
+                  child: Center(
+                    child: IconButton(
+                      icon: const Icon(Icons.menu, size: 24),
+                      onPressed: onToggle,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ClipRect(
+                    child: AnimatedOpacity(
+                      opacity: colapsada ? 0 : 1,
+                      duration: const Duration(milliseconds: 150),
+                      child: const OverflowBox(
+                        alignment: Alignment.centerLeft,
+                        minWidth: 0,
+                        maxWidth: double.infinity,
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: _LogoDeYtMusic(),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           _NavTile(
             icon: Icons.home,
             label: 'Inicio',
             selected: view == _NeoTubeView.inicio,
+            colapsada: colapsada,
             onTap: () => onSelectView(_NeoTubeView.inicio),
           ),
           _NavTile(
             icon: Icons.explore,
             label: 'Explorar',
             selected: view == _NeoTubeView.explorar,
+            colapsada: colapsada,
             onTap: () => onSelectView(_NeoTubeView.explorar),
           ),
           _NavTile(
             icon: Icons.library_music,
-            label: 'Biblioteca',
+            label: 'Mi biblioteca',
             selected: view == _NeoTubeView.biblioteca,
+            colapsada: colapsada,
             onTap: () => onSelectView(_NeoTubeView.biblioteca),
-          ),
-          _NavTile(
-            icon: Icons.search,
-            label: 'Buscar',
-            selected: view == _NeoTubeView.buscar,
-            onTap: () => onSelectView(_NeoTubeView.buscar),
           ),
           if (hayCola)
             _NavTile(
               icon: Icons.playlist_play,
               label: 'En cola',
               selected: view == _NeoTubeView.cola,
+              colapsada: colapsada,
               onTap: () => onSelectView(_NeoTubeView.cola),
             ),
           const Spacer(),
           const Divider(height: 1),
-          // Mismo pie que la barra lateral de NeoFy: los dos modos se manejan
-          // igual, y Ajustes abre el mismo diálogo con su bloque propio.
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: () => unawaited(mostrarAjustes(
-                      context,
-                      monitor: ram,
-                      settings: settings,
-                      updater: updater,
-                      onSalirParaActualizar: onSalirParaActualizar,
-                      // Lo único que cambia entre los dos modos: aquí no hay
-                      // salida de audio que reabrir, hay un yt-dlp que puede
-                      // faltar.
-                      propiosDelModo: const [EstadoDeYtDlp()],
-                    )),
-                    icon: const Icon(Icons.tune, size: 18),
-                    label: const Text('Ajustes'),
-                  ),
-                ),
-                Expanded(
-                  child: TextButton.icon(
-                    onPressed: onLogout == null ? null : () => unawaited(onLogout!()),
-                    icon: const Icon(Icons.logout, size: 18),
-                    label: const Text('Salir'),
-                  ),
-                ),
-              ],
-            ),
+          _NavTile(
+            icon: Icons.tune,
+            label: 'Ajustes',
+            selected: view == _NeoTubeView.ajustes,
+            colapsada: colapsada,
+            onTap: () => onSelectView(_NeoTubeView.ajustes),
           ),
-          const SizedBox(height: 4),
+          // Salir es una acción, no una vista, pero se dibuja como una fila
+          // más para que quede alineado con el resto de la barra lateral.
+          _NavTile(
+            icon: Icons.logout,
+            label: 'Salir',
+            selected: false,
+            colapsada: colapsada,
+            onTap: onLogout == null ? null : () => unawaited(onLogout!()),
+          ),
         ],
       ),
     );
@@ -402,22 +526,80 @@ class _NavTile extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.colapsada = false,
   });
 
   final IconData icon;
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool colapsada;
 
   @override
   Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      selected: selected,
-      leading: Icon(icon, size: 20),
-      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+    final theme = Theme.of(context);
+    // Una sola estructura para los dos estados: el icono vive en una columna
+    // FIJA de 72 px (siempre centrado) y la etiqueta se funde dentro de un
+    // `Expanded`. Solo el ancho del sidebar anima, así los hijos nunca suman
+    // más que el contenedor y no hay desbordamiento en ningún fotograma.
+    final tile = InkWell(
       onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Container(
+          height: 44,
+          decoration: BoxDecoration(
+            color: selected ? const Color(0x14FFFFFF) : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 72,
+                child: Center(
+                  child: Icon(
+                    icon,
+                    size: 22,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              Expanded(
+                // `ClipRect`: al contraer, este `Expanded` mide 0 px y el
+                // `Padding(right: 12)` de dentro forzaba un mínimo de 12 px que
+                // desbordaba el `Row` (el "RIGHT-OVERFLOW"). Recortado, la
+                // etiqueta se corta limpia en vez de reventar.
+                child: ClipRect(
+                  child: AnimatedOpacity(
+                    opacity: colapsada ? 0 : 1,
+                    duration: const Duration(milliseconds: 150),
+                    child: Padding(
+                      padding: const EdgeInsets.only(right: 12),
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
+    // Contraída no hay etiqueta a la vista: el tooltip dice qué es cada icono.
+    if (colapsada) {
+      return Tooltip(
+        message: label,
+        waitDuration: const Duration(milliseconds: 400),
+        child: tile,
+      );
+    }
+    return tile;
   }
 }
 
@@ -437,9 +619,12 @@ class _ColaScreen extends StatelessWidget {
       builder: (context, _) {
         if (player.cola.isEmpty) {
           return Center(
-            child: Text('No hay nada en la cola.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            child: Text(
+              'No hay nada en la cola.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           );
         }
         return ListView.builder(
@@ -452,15 +637,26 @@ class _ColaScreen extends StatelessWidget {
               dense: true,
               selected: activa,
               leading: ArtImage(url: t.miniatura, size: 40),
-              title: Text(t.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
-              subtitle: Text(t.artista, maxLines: 1, overflow: TextOverflow.ellipsis),
+              title: Text(
+                t.titulo,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                t.artista,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
               trailing: activa
                   ? Icon(Icons.graphic_eq, color: theme.colorScheme.primary)
                   : t.duracion == null
-                      ? null
-                      : Text(formatoDuracion(t.duracion!),
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ? null
+                  : Text(
+                      formatoDuracion(t.duracion!),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
               onTap: () => unawaited(player.saltarA(i)),
             );
           },
@@ -493,15 +689,24 @@ class _BarraInferior extends StatelessWidget {
               children: [
                 const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 20,
+                  ),
                   child: Row(
                     children: [
-                      Icon(Icons.music_off,
-                          size: 20, color: theme.colorScheme.onSurfaceVariant),
+                      Icon(
+                        Icons.music_off,
+                        size: 20,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
                       const SizedBox(width: 8),
-                      Text('Nada sonando en NeoTube',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                      Text(
+                        'Nada sonando en NeoTube',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -522,107 +727,124 @@ class _BarraInferior extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                Row(
-                  children: [
-                    Stack(
+                    Row(
                       children: [
-                        ArtImage(url: t.miniatura, size: 48, radius: 6),
-                        if (resolviendo)
-                          Positioned.fill(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black45,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Center(
-                                child: SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation(Colors.white),
+                        Stack(
+                          children: [
+                            ArtImage(url: t.miniatura, size: 48, radius: 6),
+                            if (resolviendo)
+                              Positioned.fill(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: Colors.black45,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Center(
+                                    child: SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation(
+                                          Colors.white,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
-                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                t.titulo,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                resolviendo
+                                    ? '${t.artista} • Cargando audio...'
+                                    : t.artista,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: resolviendo
+                                      ? theme.colorScheme.primary
+                                      : theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
                           ),
+                        ),
+                        _BotonFavorita(favoritos: favoritos, pista: t),
+                        const SizedBox(width: 4),
+                        IconButton(
+                          icon: const Icon(Icons.shuffle),
+                          tooltip: player.aleatorio
+                              ? 'Aleatorio: activado'
+                              : 'Aleatorio',
+                          color: player.aleatorio
+                              ? theme.colorScheme.primary
+                              : null,
+                          onPressed: player.alternarAleatorio,
+                        ),
+                        _BotonRepetir(player: player),
+                        IconButton(
+                          icon: const Icon(Icons.skip_previous),
+                          tooltip: 'Anterior',
+                          onPressed: player.puedeVolver
+                              ? () => unawaited(player.anterior())
+                              : null,
+                        ),
+                        if (resolviendo)
+                          const Padding(
+                            padding: EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 24,
+                              height: 24,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else
+                          StreamBuilder<bool>(
+                            stream: player.cambiosDeSonando,
+                            initialData: player.sonando,
+                            builder: (context, snap) {
+                              final sonando = snap.data ?? false;
+                              return IconButton.filled(
+                                icon: Icon(
+                                  sonando ? Icons.pause : Icons.play_arrow,
+                                ),
+                                tooltip: sonando ? 'Pausar' : 'Reproducir',
+                                onPressed: () => unawaited(player.alternar()),
+                              );
+                            },
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.skip_next),
+                          tooltip: 'Siguiente',
+                          onPressed: player.puedeSaltar
+                              ? () => unawaited(player.siguiente())
+                              : null,
+                        ),
+                        const SizedBox(width: 8),
+                        _Volumen(player: player),
                       ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(t.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
-                          Text(
-                            resolviendo ? '${t.artista} • Cargando audio...' : t.artista,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: resolviendo
-                                  ? theme.colorScheme.primary
-                                  : theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    _BotonFavorita(favoritos: favoritos, pista: t),
-                    const SizedBox(width: 4),
-                    IconButton(
-                      icon: const Icon(Icons.shuffle),
-                      tooltip: player.aleatorio ? 'Aleatorio: activado' : 'Aleatorio',
-                      color: player.aleatorio ? theme.colorScheme.primary : null,
-                      onPressed: player.alternarAleatorio,
-                    ),
-                    _BotonRepetir(player: player),
-                    IconButton(
-                      icon: const Icon(Icons.skip_previous),
-                      tooltip: 'Anterior',
-                      onPressed:
-                          player.puedeVolver ? () => unawaited(player.anterior()) : null,
-                    ),
-                    if (resolviendo)
-                      const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2)),
-                      )
-                    else
-                      StreamBuilder<bool>(
-                        stream: player.cambiosDeSonando,
-                        initialData: player.sonando,
-                        builder: (context, snap) {
-                          final sonando = snap.data ?? false;
-                          return IconButton.filled(
-                            icon: Icon(sonando ? Icons.pause : Icons.play_arrow),
-                            tooltip: sonando ? 'Pausar' : 'Reproducir',
-                            onPressed: () => unawaited(player.alternar()),
-                          );
-                        },
-                      ),
-                    IconButton(
-                      icon: const Icon(Icons.skip_next),
-                      tooltip: 'Siguiente',
-                      onPressed:
-                          player.puedeSaltar ? () => unawaited(player.siguiente()) : null,
-                    ),
-                    const SizedBox(width: 8),
-                    _Volumen(player: player),
+                    _Progreso(player: player),
                   ],
                 ),
-                _Progreso(player: player),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
-  },
-);
   }
 }
 
@@ -644,9 +866,7 @@ class _BotonRepetir extends StatelessWidget {
     final modo = player.repeticion;
     final activo = modo != YtRepeticion.ninguna;
     return IconButton(
-      icon: Icon(
-        modo == YtRepeticion.pista ? Icons.repeat_one : Icons.repeat,
-      ),
+      icon: Icon(modo == YtRepeticion.pista ? Icons.repeat_one : Icons.repeat),
       color: activo ? theme.colorScheme.primary : null,
       tooltip: switch (modo) {
         YtRepeticion.ninguna => 'Repetir: desactivado',
@@ -687,7 +907,9 @@ class _BotonFavorita extends StatelessWidget {
                   final ok = await favoritos.alternar(pista);
                   if (ok || !context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No se pudo cambiar Me gusta.')),
+                    const SnackBar(
+                      content: Text('No se pudo cambiar Me gusta.'),
+                    ),
                   );
                 },
         );
@@ -729,8 +951,12 @@ class _Volumen extends StatelessWidget {
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 3,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 6,
+                    ),
+                    overlayShape: const RoundSliderOverlayShape(
+                      overlayRadius: 12,
+                    ),
                   ),
                   child: Slider(
                     value: vol.toDouble(),
@@ -767,11 +993,11 @@ class _Progreso extends StatefulWidget {
 class _ProgresoState extends State<_Progreso> {
   double? _arrastrando;
 
-  /// El rojo de lo ya escuchado. Es el mismo con el que se siembra el tema
-  /// (ver `main.dart`), puesto a mano aquí para que no dependa de cómo lo
-  /// module `ColorScheme` en claro/oscuro: la barra necesita leerse como
-  /// roja en los dos para distinguirse del gris de la descarga.
-  static const _rojoEscuchado = Color(0xFFE53935);
+  /// El rojo de lo ya escuchado. Es el rojo de progreso de YouTube Music
+  /// (`--ytmusic-color-youtubered: #f00`), distinto del rojo de marca con el
+  /// que se siembra el tema: la barra necesita leerse como roja en claro y en
+  /// oscuro para distinguirse del gris de la descarga.
+  static const _rojoEscuchado = ytRojoProgreso;
 
   @override
   Widget build(BuildContext context) {
@@ -788,7 +1014,8 @@ class _ProgresoState extends State<_Progreso> {
           initialData: widget.player.posicion,
           builder: (context, snapPos) {
             final total = widget.player.duracion.inMilliseconds.toDouble();
-            final pos = (snapPos.data ?? Duration.zero).inMilliseconds.toDouble();
+            final pos = (snapPos.data ?? Duration.zero).inMilliseconds
+                .toDouble();
             if (total <= 0) {
               if (widget.player.resolviendo != null) {
                 return const SizedBox(
@@ -808,8 +1035,10 @@ class _ProgresoState extends State<_Progreso> {
             return Row(
               children: [
                 const SizedBox(width: 8),
-                Text(formatoDuracion(Duration(milliseconds: valor.round())),
-                    style: theme.textTheme.labelSmall),
+                Text(
+                  formatoDuracion(Duration(milliseconds: valor.round())),
+                  style: theme.textTheme.labelSmall,
+                ),
                 Expanded(
                   child: Stack(
                     alignment: Alignment.centerLeft,
@@ -836,24 +1065,30 @@ class _ProgresoState extends State<_Progreso> {
                             tween: Tween(begin: 0, end: progresoDescarga),
                             duration: const Duration(milliseconds: 150),
                             curve: Curves.linear,
-                            builder: (context, valorAnimado, _) => FractionallySizedBox(
-                              alignment: Alignment.centerLeft,
-                              widthFactor: valorAnimado,
-                              child: Container(
-                                height: 4,
-                                decoration: BoxDecoration(
-                                  color: theme.colorScheme.onSurface.withValues(alpha: 0.38),
-                                  borderRadius: BorderRadius.circular(2),
+                            builder: (context, valorAnimado, _) =>
+                                FractionallySizedBox(
+                                  alignment: Alignment.centerLeft,
+                                  widthFactor: valorAnimado,
+                                  child: Container(
+                                    height: 4,
+                                    decoration: BoxDecoration(
+                                      color: theme.colorScheme.onSurface
+                                          .withValues(alpha: 0.38),
+                                      borderRadius: BorderRadius.circular(2),
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
                           ),
                         ),
                       SliderTheme(
                         data: SliderTheme.of(context).copyWith(
                           trackHeight: 3,
-                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+                          thumbShape: const RoundSliderThumbShape(
+                            enabledThumbRadius: 6,
+                          ),
+                          overlayShape: const RoundSliderOverlayShape(
+                            overlayRadius: 12,
+                          ),
                           // Rojo explícito para lo ya escuchado, no el
                           // `primary` del tema: en claro y en oscuro el tema
                           // lo tiñe distinto, y aquí importa que se lea como
@@ -863,14 +1098,20 @@ class _ProgresoState extends State<_Progreso> {
                           thumbColor: _rojoEscuchado,
                           inactiveTrackColor: progresoDescarga == null
                               ? null
-                              : theme.colorScheme.onSurface.withValues(alpha: 0.08),
+                              : theme.colorScheme.onSurface.withValues(
+                                  alpha: 0.08,
+                                ),
                         ),
                         child: Slider(
                           value: valor,
                           max: total,
                           onChanged: (v) => setState(() => _arrastrando = v),
                           onChangeEnd: (v) {
-                            unawaited(widget.player.seek(Duration(milliseconds: v.round())));
+                            unawaited(
+                              widget.player.seek(
+                                Duration(milliseconds: v.round()),
+                              ),
+                            );
                             setState(() => _arrastrando = null);
                           },
                         ),
@@ -878,8 +1119,10 @@ class _ProgresoState extends State<_Progreso> {
                     ],
                   ),
                 ),
-                Text(formatoDuracion(Duration(milliseconds: total.round())),
-                    style: theme.textTheme.labelSmall),
+                Text(
+                  formatoDuracion(Duration(milliseconds: total.round())),
+                  style: theme.textTheme.labelSmall,
+                ),
                 const SizedBox(width: 8),
               ],
             );

@@ -50,6 +50,9 @@ class Settings extends ChangeNotifier {
   /// (`cacheDir()/continuaciones`).
   String? get rutaCacheContinuaciones => config.rutaCacheContinuaciones;
 
+  /// Nombre con el que firma los reportes de errores.
+  String get nombreReporte => config.nombreReporte;
+
   Future<void> setPerformanceMode(bool activo) async {
     if (modoRendimiento.value == activo) return;
     modoRendimiento.value = activo;
@@ -93,6 +96,14 @@ class Settings extends ChangeNotifier {
     final limpia = (ruta == null || ruta.trim().isEmpty) ? null : ruta.trim();
     if (config.rutaCacheContinuaciones == limpia) return;
     config.rutaCacheContinuaciones = limpia;
+    notifyListeners();
+    await config.save();
+  }
+
+  Future<void> setNombreReporte(String nombre) async {
+    final limpia = nombre.trim();
+    if (config.nombreReporte == limpia) return;
+    config.nombreReporte = limpia;
     notifyListeners();
     await config.save();
   }

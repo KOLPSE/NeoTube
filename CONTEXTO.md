@@ -768,3 +768,30 @@ siguen viviendo copias de `yt_auth.dart`, `yt_music_api.dart`, `yt_models.dart`,
 **Son dos copias del mismo código a partir de ahora.** Si aquí se arregla una trampa de
 parseo de la API interna —de las de la sección 4—, en NeoFy sigue rota. Merece la pena
 comprobarlo en los dos sitios mientras no se extraiga a un paquete compartido.
+
+---
+
+## 11. Logs y reporte de errores (NeoHub)
+
+Antes los fallos eran `debugPrint` sueltos que se perdían con la consola. Ahora todo
+acaba en **un fichero de log** y se puede **adjuntar a un reporte de NeoHub** desde
+Ajustes → «Reportar un problema».
+
+- **`lib/core/log.dart`** escribe en `%APPDATA%\neotube\logs\neotube.log` (Linux:
+  `~/.config/neotube/logs/neotube.log`), rota a `neotube.1.log` al pasar de 1 MB y vuelca
+  además por consola con `debugPrint` —que imprime también en release, así que el smoke
+  test del CI (sección 9, grep de `sin libmpv`) sigue funcionando—. El append es
+  **síncrono** a propósito: los logs que importan son los de un cuelgue, y un buffer sin
+  vaciar se pierde justo cuando más falta. Niveles: `Log.d` (solo debug), `.i`, `.w` y
+  `.e(mensaje, error, pila)`.
+- **Errores sin `catch` propio** caen igualmente en el log: `main.dart` instala
+  `FlutterError.onError`, `PlatformDispatcher.instance.onError` y un `runZonedGuarded`.
+- **`lib/core/neohub.dart`** crea el reporte (tipo `bug`, `appId=neotube`, prioridad
+  media) y adjunta los `.log` más un `contexto-neotube.txt` (sistema, arquitectura,
+  versión). La API es la pública de NeoHub (`https://neogex.xyz` con `X-NeoHub-Key`,
+  respaldo `http://192.168.1.20:6070`), la misma que usa la app de NeoHub. **Solo salen
+  `.log` y texto**: nunca `yt_cookies.json` ni `config.json` — el principio de la skill
+  `neohub-deploy` (los adjuntos son lo único que sale del equipo, y el usuario los ve
+  antes de enviar).
+- El nombre con el que firmas viaja en cada envío y se recuerda en `config.json`
+  (`nombreReporte`). La app solo crea reportes; administrarlos es cosa del panel.

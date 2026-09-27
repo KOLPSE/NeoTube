@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/log.dart';
 import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
 import '../core/yt_player.dart';
@@ -82,7 +83,7 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
         _cargando = false;
       });
     } catch (e) {
-      debugPrint('[NeoTube artista $id] $e');
+      Log.w('artista $id: $e');
       if (!mounted) return;
       setState(() {
         _error = '$e';
@@ -136,43 +137,48 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
           child: _cargando
               ? const Center(child: CircularProgressIndicator())
               : _error != null
-                  ? _mensajeDeError(theme, _error!)
-                  : a == null || a.secciones.isEmpty
-                      ? _mensajeDeError(
-                          theme, 'No hay nada que enseñar de este artista.')
-                      : _cuerpo(theme, a),
+              ? _mensajeDeError(theme, _error!)
+              : a == null || a.secciones.isEmpty
+              ? _mensajeDeError(
+                  theme,
+                  'No hay nada que enseñar de este artista.',
+                )
+              : _cuerpo(theme, a),
         ),
       ],
     );
   }
 
   Widget _mensajeDeError(ThemeData theme, String texto) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                texto,
-                textAlign: TextAlign.center,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () => unawaited(_cargar(forzar: true)),
-                icon: const Icon(Icons.refresh),
-                label: const Text('Reintentar'),
-              ),
-            ],
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            texto,
+            textAlign: TextAlign.center,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
-        ),
-      );
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: () => unawaited(_cargar(forzar: true)),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Reintentar'),
+          ),
+        ],
+      ),
+    ),
+  );
 
   Widget _cuerpo(ThemeData theme, YtArtista a) {
-    final estilo = theme.textTheme.bodySmall ?? const TextStyle(fontSize: 12);
+    // El título de la tarjeta va en `bodyMedium` (14 px), igual que en la
+    // portada: se estima con ese tamaño para no cortar la tira.
+    final estilo = theme.textTheme.bodyMedium ?? const TextStyle(fontSize: 14);
     final altoTira = altoDeTiraDeTarjetas(context, estilo, 3);
 
     return AnimatedBuilder(
@@ -190,7 +196,10 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
               if (seccion.titulo.isNotEmpty) ...[
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: Text(seccion.titulo, style: theme.textTheme.titleMedium),
+                  child: Text(
+                    seccion.titulo,
+                    style: theme.textTheme.titleLarge,
+                  ),
                 ),
                 const SizedBox(height: 12),
               ],
@@ -199,22 +208,33 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
               else
                 TiraHorizontal(
                   alto: altoTira,
-                  centroDeFlechas: margenDeTarjeta + ladoDeTarjeta / 2,
+                  centroDeFlechas: margenDeTarjeta + altoDeMiniatura / 2,
                   itemCount: seccion.items.length,
                   itemBuilder: (context, j) {
                     final item = seccion.items[j];
                     return TarjetaDeYtItem(
                       item: item,
-                      cargando: item.videoId != null &&
+                      cargando:
+                          item.videoId != null &&
                           widget.player.resolviendo == item.videoId,
-                      sonando: item.videoId != null &&
+                      sonando:
+                          item.videoId != null &&
                           widget.player.actual?.videoId == item.videoId,
-                      onTap: () => unawaited(widget.acciones
-                          .pulsar(context, item, hermanas: seccion.items)),
+                      onTap: () => unawaited(
+                        widget.acciones.pulsar(
+                          context,
+                          item,
+                          hermanas: seccion.items,
+                        ),
+                      ),
                       onReproducir: item.esCancion || !item.esNavegable
                           ? null
                           : () => unawaited(
-                              widget.acciones.reproducirColeccion(context, item)),
+                              widget.acciones.reproducirColeccion(
+                                context,
+                                item,
+                              ),
+                            ),
                     );
                   },
                 ),
@@ -237,54 +257,80 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
     return Column(
       children: [
         for (var i = 0; i < seccion.items.length; i++)
-          Builder(builder: (context) {
-            final item = seccion.items[i];
-            final activa = item.videoId == sonando;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: ListTile(
-                dense: true,
-                selected: activa,
-                leading: SizedBox(
-                  width: 76,
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 24,
-                        child: widget.player.resolviendo == item.videoId
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2))
-                            : activa
-                                ? Icon(Icons.graphic_eq,
-                                    size: 16, color: theme.colorScheme.primary)
-                                : Text('${i + 1}',
-                                    textAlign: TextAlign.center,
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                        color: theme.colorScheme.onSurfaceVariant)),
-                      ),
-                      const SizedBox(width: 8),
-                      ArtImage(url: item.miniatura, size: 44, radius: 4),
-                    ],
+          Builder(
+            builder: (context) {
+              final item = seccion.items[i];
+              final activa = item.videoId == sonando;
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: ListTile(
+                  dense: true,
+                  selected: activa,
+                  leading: SizedBox(
+                    width: 76,
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          child: widget.player.resolviendo == item.videoId
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : activa
+                              ? Icon(
+                                  Icons.graphic_eq,
+                                  size: 16,
+                                  color: theme.colorScheme.primary,
+                                )
+                              : Text(
+                                  '${i + 1}',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(width: 8),
+                        ArtImage(url: item.miniatura, size: 44, radius: 4),
+                      ],
+                    ),
+                  ),
+                  title: Text(
+                    item.titulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    item.subtitulo,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: item.duracion == null
+                      ? null
+                      : Text(
+                          formatoDuracion(item.duracion!),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                  // `hermanas` es la sección entera: pulsar la tercera de "más
+                  // escuchadas" pone a sonar esa y deja las demás detrás, en vez
+                  // de dejar el reproductor con una canción suelta.
+                  onTap: () => unawaited(
+                    widget.acciones.pulsar(
+                      context,
+                      item,
+                      hermanas: seccion.items,
+                    ),
                   ),
                 ),
-                title: Text(item.titulo, maxLines: 1, overflow: TextOverflow.ellipsis),
-                subtitle: Text(item.subtitulo,
-                    maxLines: 1, overflow: TextOverflow.ellipsis),
-                trailing: item.duracion == null
-                    ? null
-                    : Text(formatoDuracion(item.duracion!),
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                // `hermanas` es la sección entera: pulsar la tercera de "más
-                // escuchadas" pone a sonar esa y deja las demás detrás, en vez
-                // de dejar el reproductor con una canción suelta.
-                onTap: () => unawaited(widget.acciones
-                    .pulsar(context, item, hermanas: seccion.items)),
-              ),
-            );
-          }),
+              );
+            },
+          ),
       ],
     );
   }
@@ -310,23 +356,31 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
               radius: 12,
             ),
           const SizedBox(height: 16),
-          Text(a.nombre.isEmpty ? widget.item.titulo : a.nombre,
-              style: theme.textTheme.headlineSmall,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis),
+          Text(
+            a.nombre.isEmpty ? widget.item.titulo : a.nombre,
+            style: theme.textTheme.headlineSmall,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
           if (a.subtitulo.isNotEmpty) ...[
             const SizedBox(height: 4),
-            Text(a.subtitulo,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text(
+              a.subtitulo,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
           if (a.descripcion != null && a.descripcion!.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(a.descripcion!,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            Text(
+              a.descripcion!,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
           if (a.playlistAleatorio != null || a.playlistRadio != null) ...[
             const SizedBox(height: 16),
@@ -343,7 +397,8 @@ class _YtArtistaScreenState extends State<YtArtistaScreen> {
                   const SizedBox(width: 12),
                 if (a.playlistRadio != null)
                   OutlinedButton.icon(
-                    onPressed: () => unawaited(_reproducirLista(a.playlistRadio!)),
+                    onPressed: () =>
+                        unawaited(_reproducirLista(a.playlistRadio!)),
                     icon: const Icon(Icons.radio),
                     label: const Text('Mix'),
                   ),

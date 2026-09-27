@@ -1,10 +1,10 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import 'app_config.dart';
+import 'log.dart';
 import 'yt_models.dart';
 import 'yt_player.dart';
 
@@ -96,7 +96,7 @@ class SesionDeReproduccion {
         ),
       );
     } catch (e) {
-      debugPrint('[NeoTube sesión] no se pudo leer la sesión guardada: $e');
+      Log.w('sesión: no se pudo leer la guardada: $e');
       return null;
     }
   }
@@ -158,7 +158,7 @@ class SesionDeReproduccion {
       await tmp.writeAsString(jsonEncode(mapa), flush: true);
       await tmp.rename(destino.path);
     } catch (e) {
-      debugPrint('[NeoTube sesión] no se pudo guardar: $e');
+      Log.w('sesión: no se pudo guardar: $e');
     }
   }
 

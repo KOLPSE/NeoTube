@@ -6,6 +6,7 @@ import 'dart:isolate';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
+import 'log.dart';
 import 'yt_auth.dart';
 import 'yt_cache.dart';
 import 'yt_models.dart';
@@ -337,7 +338,7 @@ class YtMusicApi {
     }
 
     if (secciones.isEmpty) {
-      debugPrint('[NeoTube browse $browseId] respuesta sin secciones parseables');
+      Log.w('browse $browseId: respuesta sin secciones parseables');
     } else {
       cache.set(clave, secciones);
     }
@@ -367,7 +368,7 @@ class YtMusicApi {
       bytes = await _postBytes('browse', {'browseId': canonico});
     } catch (e) {
       if (canonico == browseId) rethrow;
-      debugPrint('[NeoTube artista] $canonico falló ($e); probando $browseId');
+      Log.w('artista $canonico falló ($e); probando $browseId');
       bytes = await _postBytes('browse', {'browseId': browseId});
     }
 
@@ -760,7 +761,7 @@ class YtMusicApi {
         }
       }
     } catch (e) {
-      debugPrint('[NeoTube buscar] no se pudo parsear: $e');
+      Log.w('buscar: no se pudo parsear: $e');
     }
     return secciones;
   }
@@ -890,7 +891,7 @@ class YtMusicApi {
       browseSections(claves[indice], forzar: forzar).then((r) {
         resultados[indice] = r;
       }, onError: (Object e) {
-        debugPrint('[NeoTube biblioteca ${claves[indice]}] fallo: $e');
+        Log.w('biblioteca ${claves[indice]}: $e');
         resultados[indice] = const <YtSection>[];
       }).whenComplete(() {
         restantes--;
@@ -1140,7 +1141,7 @@ class YtMusicApi {
         if (p != null) pistas.add(p);
       }
     } catch (e) {
-      debugPrint('[NeoTube next] no se pudo parsear la cola: $e');
+      Log.w('next: no se pudo parsear la cola: $e');
     }
     if (pistas.isEmpty) {
       throw YtApiException('YouTube Music no devolvió ninguna pista para esta lista.');
@@ -1161,7 +1162,7 @@ class YtMusicApi {
       final c = await _colaDe(videoId: videoId, playlistId: 'RDAMVM$videoId');
       return c.pistas;
     } catch (e) {
-      debugPrint('[NeoTube radio] $e');
+      Log.w('radio: $e');
       return const [];
     }
   }

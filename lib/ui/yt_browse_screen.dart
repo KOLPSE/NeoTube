@@ -42,18 +42,26 @@ class YtBrowseScreen extends StatefulWidget {
 
 /// Medidas de la tarjeta. Sueltas y no dentro del widget porque el alto de la
 /// tira hay que calcularlo fuera, igual que en `home_screen.dart`.
-const double ladoDeTarjeta = 132;
+///
+/// La tarjeta es **16:9**, como la de un vídeo musical en la web: una
+/// miniatura ancha con el título y los metadatos debajo, no un cuadrado.
+const double anchoDeTarjeta = 220;
+const double altoDeMiniatura = 124; // 220 * 9/16
 const double margenDeTarjeta = 4;
-const double huecoDeTarjeta = 6;
+const double huecoDeTarjeta = 8;
 
-/// Alto exacto que necesita una tira: carátula, hueco y las líneas de texto,
+/// Alto exacto que necesita una tira: miniatura, hueco y las líneas de texto,
 /// **escaladas como las escale el sistema**. A ojo se corta en cuanto alguien
 /// tiene el tamaño de letra subido.
-double altoDeTiraDeTarjetas(BuildContext context, TextStyle estilo, int lineas) {
+double altoDeTiraDeTarjetas(
+  BuildContext context,
+  TextStyle estilo,
+  int lineas,
+) {
   final tamano = MediaQuery.textScalerOf(context).scale(estilo.fontSize ?? 14);
   final altoDeLinea = tamano * (estilo.height ?? 1.4);
   return margenDeTarjeta * 2 +
-      ladoDeTarjeta +
+      altoDeMiniatura +
       huecoDeTarjeta +
       (altoDeLinea * lineas).ceilToDouble();
 }
@@ -104,16 +112,21 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
             onReintentar: () => unawaited(store.cargar()),
           );
         }
-        // Tres líneas: título y hasta dos de subtítulo ("Lista • 42
-        // canciones" se parte con frecuencia).
-        final estilo = theme.textTheme.bodySmall ?? const TextStyle(fontSize: 12);
+        // Tres líneas: título (2) y subtítulo (1). El título ahora va en
+        // `bodyMedium` (14 px), así que se estima con ese tamaño para no
+        // cortar la tarjeta por abajo.
+        final estilo =
+            theme.textTheme.bodyMedium ?? const TextStyle(fontSize: 14);
         final alto = altoDeTiraDeTarjetas(context, estilo, 3);
         return ListView.builder(
           key: PageStorageKey(widget.store),
-          padding: const EdgeInsets.symmetric(vertical: 24),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           itemCount: store.secciones.length,
           itemBuilder: (context, index) {
             final seccion = store.secciones[index];
+            final tieneCanciones = seccion.items.any(
+              (it) => it.esCancion && it.comoPista != null,
+            );
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -121,29 +134,56 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
                 if (seccion.titulo.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(seccion.titulo, style: theme.textTheme.titleMedium),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            seccion.titulo,
+                            style: theme.textTheme.headlineLarge,
+                          ),
+                        ),
+                        // "Reproducir todo", como en la web: solo si la
+                        // sección trae canciones que poner en cola.
+                        if (tieneCanciones)
+                          _BotonReproducirTodo(
+                            onTap: () => unawaited(
+                              widget.acciones.reproducirTodo(seccion.items),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 12),
                 ],
                 TiraHorizontal(
                   alto: alto,
-                  centroDeFlechas: margenDeTarjeta + ladoDeTarjeta / 2,
+                  centroDeFlechas: margenDeTarjeta + altoDeMiniatura / 2,
                   itemCount: seccion.items.length,
                   itemBuilder: (context, i) {
                     final item = seccion.items[i];
                     return TarjetaDeYtItem(
                       item: item,
-                      cargando: item.videoId != null &&
+                      cargando:
+                          item.videoId != null &&
                           widget.player.resolviendo == item.videoId,
-                      sonando: item.videoId != null &&
+                      sonando:
+                          item.videoId != null &&
                           widget.player.actual?.videoId == item.videoId,
                       onTap: () => unawaited(
-                        widget.acciones.pulsar(context, item, hermanas: seccion.items),
+                        widget.acciones.pulsar(
+                          context,
+                          item,
+                          hermanas: seccion.items,
+                        ),
                       ),
                       onReproducir: item.esCancion || !item.esNavegable
                           ? null
-                          : () =>
-                              unawaited(widget.acciones.reproducirColeccion(context, item)),
+                          : () => unawaited(
+                              widget.acciones.reproducirColeccion(
+                                context,
+                                item,
+                              ),
+                            ),
                     );
                   },
                 ),
@@ -161,33 +201,35 @@ class _YtBrowseScreenState extends State<YtBrowseScreen> {
     String texto, {
     bool esError = false,
     required VoidCallback onReintentar,
-  }) =>
-      Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                texto,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: esError
-                    ? theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error)
-                    : theme.textTheme.bodyMedium
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: onReintentar,
-                icon: const Icon(Icons.refresh),
-                label: Text(esError ? 'Reintentar' : 'Recargar'),
-              ),
-            ],
+  }) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            texto,
+            maxLines: 4,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: esError
+                ? theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  )
+                : theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
           ),
-        ),
-      );
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: onReintentar,
+            icon: const Icon(Icons.refresh),
+            label: Text(esError ? 'Reintentar' : 'Recargar'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 /// La tarjeta de un elemento de una tira. Pública para poder probarla suelta:
@@ -226,8 +268,10 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
     final theme = Theme.of(context);
     final item = widget.item;
     // Los artistas los pinta redondos el cliente oficial, y la forma es la
-    // pista más rápida para saber que eso no es un disco.
-    final radio = item.tipo == YtTipo.artista ? ladoDeTarjeta / 2 : 8.0;
+    // pista más rápida para saber que eso no es un disco. En una tarjeta 16:9
+    // el avatar del artista se queda cuadrado (alto = ancho) y redondo.
+    final esArtista = item.tipo == YtTipo.artista;
+    final radio = esArtista ? altoDeMiniatura / 2 : 8.0;
     final abrible = widget.onReproducir != null;
 
     return MouseRegion(
@@ -242,27 +286,36 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
           child: Padding(
             padding: const EdgeInsets.all(margenDeTarjeta),
             child: SizedBox(
-              width: ladoDeTarjeta,
+              width: anchoDeTarjeta,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Stack(
                     children: [
-                      ArtImage(url: item.miniatura, size: ladoDeTarjeta, radius: radio),
+                      ArtImage(
+                        url: item.miniatura,
+                        size: altoDeMiniatura,
+                        ancho: esArtista ? altoDeMiniatura : anchoDeTarjeta,
+                        radius: radio,
+                      ),
                       if (widget.cargando)
                         Positioned.fill(
                           child: Center(
                             child: Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: theme.colorScheme.surface.withValues(alpha: 0.7),
+                                color: theme.colorScheme.surface.withValues(
+                                  alpha: 0.7,
+                                ),
                                 shape: BoxShape.circle,
                               ),
                               child: const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               ),
                             ),
                           ),
@@ -283,6 +336,22 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
                             onPressed: widget.onReproducir!,
                           ),
                         )
+                      // En una canción suelta el triángulo sale centrado al
+                      // pasar el ratón, como en el vídeo musical de la web: la
+                      // tarjeta entera la reproduce, no hay dos acciones.
+                      else if (!abrible && _encima && item.esCancion)
+                        const Positioned.fill(
+                          child: Center(
+                            child: Icon(
+                              Icons.play_arrow,
+                              size: 44,
+                              color: Colors.white,
+                              shadows: [
+                                Shadow(blurRadius: 8, color: Colors.black54),
+                              ],
+                            ),
+                          ),
+                        )
                       else
                         Positioned(
                           right: 4,
@@ -290,11 +359,15 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
                           child: Container(
                             padding: const EdgeInsets.all(4),
                             decoration: BoxDecoration(
-                              color: theme.colorScheme.surface.withValues(alpha: 0.8),
+                              color: theme.colorScheme.surface.withValues(
+                                alpha: 0.8,
+                              ),
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
-                              widget.sonando ? Icons.graphic_eq : iconoDe(item.tipo),
+                              widget.sonando
+                                  ? Icons.graphic_eq
+                                  : iconoDe(item.tipo),
                               size: 14,
                               color: widget.sonando
                                   ? theme.colorScheme.primary
@@ -307,18 +380,20 @@ class _TarjetaState extends State<TarjetaDeYtItem> {
                   const SizedBox(height: huecoDeTarjeta),
                   Text(
                     item.titulo,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall?.copyWith(
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
                       color: widget.sonando ? theme.colorScheme.primary : null,
                     ),
                   ),
                   Text(
                     item.subtitulo,
-                    maxLines: 2,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -342,19 +417,52 @@ class _BotonPlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Tooltip(
       message: 'Reproducir sin abrir',
+      // Blanco con el triángulo oscuro, como el botón de play que saca
+      // YouTube Music al pasar por encima de un disco o una lista.
       child: Material(
-        color: theme.colorScheme.primary,
+        color: Colors.white,
         shape: const CircleBorder(),
         elevation: 4,
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onPressed,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Icon(Icons.play_arrow, size: 20, color: theme.colorScheme.onPrimary),
+          child: const Padding(
+            padding: EdgeInsets.all(8),
+            child: Icon(Icons.play_arrow, size: 20, color: Color(0xFF030303)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// El botón "Reproducir todo" de una cabecera de sección: una píldora oscura
+/// con un borde sutil, como en la web.
+class _BotonReproducirTodo extends StatelessWidget {
+  const _BotonReproducirTodo({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      shape: const StadiumBorder(),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.play_arrow, size: 18),
+              const SizedBox(width: 6),
+              Text('Reproducir todo', style: theme.textTheme.labelLarge),
+            ],
           ),
         ),
       ),

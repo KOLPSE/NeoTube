@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/log.dart';
 import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
 import '../core/yt_player.dart';
@@ -18,11 +19,16 @@ class YtSearchScreen extends StatefulWidget {
     required this.api,
     required this.player,
     required this.acciones,
+    this.peticionExterna,
   });
 
   final YtMusicApi api;
   final YtPlayer player;
   final YtAcciones acciones;
+
+  /// La consulta pedida desde la barra superior. Cambia de valor con cada
+  /// Intro; la pantalla se suscribe y repite la búsqueda.
+  final ValueNotifier<String?>? peticionExterna;
 
   @override
   State<YtSearchScreen> createState() => _YtSearchScreenState();
@@ -47,7 +53,6 @@ class _SeparadorSeccion extends _ElementoDeBusqueda {
 }
 
 class _YtSearchScreenState extends State<YtSearchScreen> {
-  final _ctrl = TextEditingController();
   List<_ElementoDeBusqueda> _elementos = const [];
   bool _buscando = false;
   String? _error;
@@ -56,18 +61,44 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
 
   /// La consulta con la que se pintó lo que hay ahora en pantalla.
   ///
-  /// Cambiar de filtro tiene que repetir **esa** búsqueda, no lo que haya
-  /// escrito en la caja: si el usuario dejó el cursor a medio escribir otra
-  /// cosa, pulsar un chip buscaría una palabra incompleta que nunca pidió.
+  /// Cambiar de filtro tiene que repetir **esa** búsqueda, no lo que haya en
+  /// la barra superior: si el usuario dejó escrita otra cosa, pulsar un chip
+  /// buscaría una palabra que nunca pidió.
   String _consultaEnPantalla = '';
 
   @override
+  void initState() {
+    super.initState();
+    widget.peticionExterna?.addListener(_alPedirExterna);
+    final inicial = widget.peticionExterna?.value;
+    if (inicial != null && inicial.isNotEmpty) {
+      unawaited(_buscar(inicial));
+    }
+  }
+
+  @override
+  void didUpdateWidget(YtSearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.peticionExterna != widget.peticionExterna) {
+      oldWidget.peticionExterna?.removeListener(_alPedirExterna);
+      widget.peticionExterna?.addListener(_alPedirExterna);
+    }
+  }
+
+  @override
   void dispose() {
-    _ctrl.dispose();
+    widget.peticionExterna?.removeListener(_alPedirExterna);
     super.dispose();
   }
 
-  static List<_ElementoDeBusqueda> _aplanarResultados(List<YtSection> secciones) {
+  void _alPedirExterna() {
+    final q = widget.peticionExterna?.value;
+    if (q != null && q.isNotEmpty) unawaited(_buscar(q));
+  }
+
+  static List<_ElementoDeBusqueda> _aplanarResultados(
+    List<YtSection> secciones,
+  ) {
     final list = <_ElementoDeBusqueda>[];
     for (final seccion in secciones) {
       if (seccion.titulo.isNotEmpty) {
@@ -88,8 +119,8 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
     if (_consultaEnPantalla.isNotEmpty) unawaited(_buscar(_consultaEnPantalla));
   }
 
-  Future<void> _buscar([String? consulta]) async {
-    final query = (consulta ?? _ctrl.text).trim();
+  Future<void> _buscar(String consulta) async {
+    final query = consulta.trim();
     if (query.isEmpty) return;
     setState(() {
       _buscando = true;
@@ -105,7 +136,7 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
       // La API interna no tiene documentación oficial, así que conviene ver el
       // fallo completo en consola — el mensaje en pantalla se recorta para no
       // desbordar el layout.
-      debugPrint('[NeoTube buscar] fallo completo: $e');
+      Log.w('buscar: fallo completo: $e');
       if (mounted) setState(() => _error = '$e');
     } finally {
       if (mounted) setState(() => _buscando = false);
@@ -119,29 +150,7 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
-          child: TextField(
-            controller: _ctrl,
-            autofocus: true,
-            decoration: InputDecoration(
-              hintText: 'Buscar canciones, listas, álbumes o artistas',
-              prefixIcon: const Icon(Icons.search),
-              border: const OutlineInputBorder(),
-              suffixIcon: _buscando
-                  ? const Padding(
-                      padding: EdgeInsets.all(12),
-                      child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2)),
-                    )
-                  : null,
-            ),
-            onSubmitted: (_) => unawaited(_buscar()),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
+          padding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
           child: Wrap(
             spacing: 8,
             runSpacing: 4,
@@ -171,7 +180,9 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
               // una página entera. Recortado aquí; el completo va a la consola.
               maxLines: 3,
               overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
             ),
           ),
         Expanded(child: _resultados(theme)),
@@ -185,9 +196,10 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
         child: Text(
           _buscadoAlgunaVez && !_buscando
               ? 'Sin resultados.'
-              : 'Escribe algo y pulsa Intro.',
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              : 'Busca desde la barra superior.',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       );
     }
@@ -200,9 +212,9 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
           final elem = _elementos[index];
           return switch (elem) {
             _EncabezadoBusqueda(:final titulo) => Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 4),
-                child: Text(titulo, style: theme.textTheme.titleSmall),
-              ),
+              padding: const EdgeInsets.only(top: 8, bottom: 4),
+              child: Text(titulo, style: theme.textTheme.titleSmall),
+            ),
             _ItemBusqueda(:final item) => _fila(theme, item),
             _SeparadorSeccion() => const SizedBox(height: 12),
           };
@@ -212,8 +224,10 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
   }
 
   Widget _fila(ThemeData theme, YtItem item) {
-    final sonando = item.videoId != null && widget.player.actual?.videoId == item.videoId;
-    final cargando = item.videoId != null && widget.player.resolviendo == item.videoId;
+    final sonando =
+        item.videoId != null && widget.player.actual?.videoId == item.videoId;
+    final cargando =
+        item.videoId != null && widget.player.resolviendo == item.videoId;
     return ListTile(
       dense: true,
       selected: sonando,
@@ -230,18 +244,25 @@ class _YtSearchScreenState extends State<YtSearchScreen> {
       ),
       trailing: cargando
           ? const SizedBox(
-              width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : Icon(sonando ? Icons.graphic_eq : iconoDe(item.tipo),
-              color: sonando ? theme.colorScheme.primary : null),
-      onTap: cargando ? null : () => unawaited(widget.acciones.pulsar(context, item)),
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(
+              sonando ? Icons.graphic_eq : iconoDe(item.tipo),
+              color: sonando ? theme.colorScheme.primary : null,
+            ),
+      onTap: cargando
+          ? null
+          : () => unawaited(widget.acciones.pulsar(context, item)),
     );
   }
 
   String _nombreDe(YtTipo t) => switch (t) {
-        YtTipo.cancion => 'Canción',
-        YtTipo.lista => 'Lista',
-        YtTipo.album => 'Álbum',
-        YtTipo.artista => 'Artista',
-        YtTipo.desconocido => '',
-      };
+    YtTipo.cancion => 'Canción',
+    YtTipo.lista => 'Lista',
+    YtTipo.album => 'Álbum',
+    YtTipo.artista => 'Artista',
+    YtTipo.desconocido => '',
+  };
 }

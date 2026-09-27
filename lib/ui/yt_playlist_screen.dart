@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/log.dart';
 import '../core/yt_favoritos.dart';
 import '../core/yt_models.dart';
 import '../core/yt_music_api.dart';
@@ -211,7 +212,7 @@ class _YtPlaylistScreenState extends State<YtPlaylistScreen> {
         });
       },
       onError: (e) {
-        debugPrint('[NeoTube lista ${widget.item.playlistId ?? widget.item.browseId}] $e');
+        Log.w('lista ${widget.item.playlistId ?? widget.item.browseId}: $e');
         if (!mounted) return;
         setState(() {
           _error = '$e';

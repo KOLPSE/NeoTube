@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/yt_auth.dart';
+import 'yt_theme.dart';
 
 /// Login de NeoTube: "solo te logeas y ya", como en Metrolist/InnerTune.
 ///
@@ -10,7 +11,11 @@ import '../core/yt_auth.dart';
 /// toda la app que usa un motor de navegador; el resto de NeoTube sigue
 /// siendo Flutter nativo.
 class YtLoginScreen extends StatefulWidget {
-  const YtLoginScreen({super.key, required this.auth, required this.onLoggedIn});
+  const YtLoginScreen({
+    super.key,
+    required this.auth,
+    required this.onLoggedIn,
+  });
 
   final YtAuth auth;
   final Future<void> Function() onLoggedIn;
@@ -48,17 +53,15 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.play_circle, size: 56, color: theme.colorScheme.primary),
-              const SizedBox(height: 20),
-              Text('NeoTube', style: theme.textTheme.headlineSmall),
-              const SizedBox(height: 8),
+              // La misma marca que la barra superior: el círculo rojo con el
+              // triángulo y la palabra "Music", no un icono suelto de app.
+              const YtMusicLogo(size: 56),
+              const SizedBox(height: 24),
               Text(
-                'YouTube Music sin necesitar cuenta Premium. Solo hace falta '
-                'iniciar sesión con Google.',
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                'Inicia sesión para escuchar tu música',
+                style: theme.textTheme.titleLarge,
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -69,11 +72,14 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
                       ? const SizedBox(
                           width: 16,
                           height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2))
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
                       : const Icon(Icons.login),
                   label: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(_busy ? 'Esperando el login…' : 'Conectar con Google'),
+                    child: Text(
+                      _busy ? 'Esperando el login…' : 'Conectar con Google',
+                    ),
                   ),
                 ),
               ),
@@ -81,7 +87,9 @@ class _YtLoginScreenState extends State<YtLoginScreen> {
                 const SizedBox(height: 16),
                 SelectableText(
                   _error!,
-                  style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.error),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
                 ),
               ],
             ],

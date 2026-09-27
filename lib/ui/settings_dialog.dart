@@ -8,45 +8,23 @@ import '../core/resource_monitor.dart';
 import '../core/settings.dart';
 import '../core/updater.dart';
 
-/// Ajustes: lo que gasta la app, el modo rendimiento y las actualizaciones.
+import 'yt_ajustes.dart';
+
+/// Ajustes como página del sidebar, no como diálogo flotante.
 ///
 /// El consumo se enseña aquí y no en una barra permanente porque es un dato de
 /// diagnóstico, no algo que haga falta mirar mientras escuchas música.
 ///
-/// **El mismo diálogo sirve a los dos modos.** Casi todo lo que hay dentro es
-/// de la app entera y no de uno de ellos: la memoria y la CPU las gasta un
-/// único proceso, el modo rendimiento toca la caché de imágenes que comparten
-/// los dos, y la actualización trae un solo binario. Duplicar el diálogo
-/// habría significado mantener dos copias de eso para que solo cambiara un
-/// bloque — de ahí [propiosDelModo], que es justo ese bloque: en NeoFy,
-/// reiniciar la salida de audio de librespot; en NeoTube, el estado de yt-dlp.
-Future<void> mostrarAjustes(
-  BuildContext context, {
-  required ResourceMonitor monitor,
-  required Settings settings,
-  required Updater updater,
-  required Future<void> Function() onSalirParaActualizar,
-  List<Widget> propiosDelModo = const [],
-}) {
-  return showDialog<void>(
-    context: context,
-    builder: (context) => _DialogoAjustes(
-      monitor: monitor,
-      settings: settings,
-      updater: updater,
-      onSalirParaActualizar: onSalirParaActualizar,
-      propiosDelModo: propiosDelModo,
-    ),
-  );
-}
-
-class _DialogoAjustes extends StatelessWidget {
-  const _DialogoAjustes({
+/// Antes era un `AlertDialog` que flotaba sobre el contenido; ahora es una
+/// vista más del shell (como Inicio o Biblioteca), elegida desde la barra
+/// lateral, para que la app no tenga ninguna ventana flotante.
+class YtAjustesScreen extends StatelessWidget {
+  const YtAjustesScreen({
+    super.key,
     required this.monitor,
     required this.settings,
     required this.updater,
     required this.onSalirParaActualizar,
-    required this.propiosDelModo,
   });
 
   final ResourceMonitor monitor;
@@ -57,23 +35,21 @@ class _DialogoAjustes extends StatelessWidget {
   /// ejecutable en uso.
   final Future<void> Function() onSalirParaActualizar;
 
-  /// Los bloques que solo tienen sentido en el modo desde el que se abrió.
-  final List<Widget> propiosDelModo;
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AlertDialog(
-      title: const Text('Ajustes'),
-      content: SizedBox(
-        width: 380,
-        child: SingleChildScrollView(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Text('Ajustes', style: theme.textTheme.headlineMedium),
+              const SizedBox(height: 20),
               // Se repinta con cada muestra del monitor (cada 3 s); es lo único
-              // vivo del diálogo.
+              // vivo de la página.
               AnimatedBuilder(
                 animation: monitor,
                 builder: (context, _) {
@@ -107,13 +83,14 @@ class _DialogoAjustes extends StatelessWidget {
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: settings.performanceMode,
-                      onChanged: (v) => unawaited(settings.setPerformanceMode(v)),
+                      onChanged: (v) =>
+                          unawaited(settings.setPerformanceMode(v)),
                       title: const Text('Modo rendimiento'),
                       subtitle: Text(
-                        'Sustituye las carátulas por mosaicos de color y apaga el '
-                        'lector de metadatos. El audio no se toca.',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        'Sustituye las carátulas por mosaicos de color.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     const Divider(height: 12),
@@ -122,13 +99,15 @@ class _DialogoAjustes extends StatelessWidget {
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       value: settings.discordRpcEnabled,
-                      onChanged: (v) => unawaited(settings.setDiscordRpcEnabled(v)),
+                      onChanged: (v) =>
+                          unawaited(settings.setDiscordRpcEnabled(v)),
                       title: const Text('Mostrar en Discord (Rich Presence)'),
                       subtitle: Text(
                         'Enseña en tu perfil de Discord la canción que suena, la '
                         'siguiente de la cola y un botón a GitHub.',
-                        style: theme.textTheme.bodySmall
-                            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ),
                     if (settings.discordRpcEnabled) ...[
@@ -138,10 +117,8 @@ class _DialogoAjustes extends StatelessWidget {
                   ],
                 ),
               ),
-              for (final bloque in propiosDelModo) ...[
-                const Divider(height: 12),
-                bloque,
-              ],
+              const Divider(height: 12),
+              const EstadoDeYtDlp(),
               const Divider(height: 12),
               _Actualizaciones(
                 updater: updater,
@@ -151,12 +128,6 @@ class _DialogoAjustes extends StatelessWidget {
           ),
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cerrar'),
-        ),
-      ],
     );
   }
 }
@@ -210,17 +181,19 @@ class _Actualizaciones extends StatelessWidget {
                       // Donde no se instala sola (Linux), el aviso tiene que
                       // decir qué hacer: si no, informa de una novedad y deja
                       // al usuario sin ninguna forma de cogerla.
-                      EstadoActualizacion.disponible => Updater.seInstalaSolo
-                          ? 'Hay una versión nueva: ${updater.versionDisponible}'
-                          : 'Hay una versión nueva (${updater.versionDisponible}). '
-                              'Actualiza con ${Updater.comandoDeActualizacion}',
+                      EstadoActualizacion.disponible =>
+                        Updater.seInstalaSolo
+                            ? 'Hay una versión nueva: ${updater.versionDisponible}'
+                            : 'Hay una versión nueva (${updater.versionDisponible}). '
+                                  'Actualiza con ${Updater.comandoDeActualizacion}',
                       EstadoActualizacion.descargando =>
                         'Descargando… ${(updater.progreso * 100).round()} %',
                       EstadoActualizacion.listaParaInstalar =>
                         'Instalando; NeoTube se reiniciará',
                       EstadoActualizacion.fallo =>
                         updater.error ?? 'No se pudo comprobar',
-                      EstadoActualizacion.reposo => 'Comprobar si hay novedades',
+                      EstadoActualizacion.reposo =>
+                        'Comprobar si hay novedades',
                     },
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: estado == EstadoActualizacion.disponible
@@ -281,8 +254,9 @@ class _Medida extends StatelessWidget {
         Text(valor, style: theme.textTheme.titleLarge),
         Text(
           etiqueta,
-          style: theme.textTheme.labelSmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -313,7 +287,8 @@ class _CampoDiscordClientIdState extends State<_CampoDiscordClientId> {
     if (!_foco.hasFocus) _guardar();
   }
 
-  void _guardar() => unawaited(widget.settings.setDiscordClientId(_controller.text));
+  void _guardar() =>
+      unawaited(widget.settings.setDiscordClientId(_controller.text));
 
   @override
   void didUpdateWidget(covariant _CampoDiscordClientId oldWidget) {
@@ -339,13 +314,13 @@ class _CampoDiscordClientIdState extends State<_CampoDiscordClientId> {
       focusNode: _foco,
       decoration: InputDecoration(
         labelText: 'Client ID de Discord',
-        hintText: 'Pega aquí el Client ID de tu aplicación',
         helperText:
             'Crea una app en el Discord Developer Portal con un asset llamado "logo" '
             '(en minuscula: Discord distingue mayusculas)',
         helperMaxLines: 2,
-        helperStyle: theme.textTheme.bodySmall
-            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        helperStyle: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
         isDense: true,
         border: const OutlineInputBorder(),
       ),
@@ -384,13 +359,16 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
   @override
   void initState() {
     super.initState();
-    _rutaController = TextEditingController(text: widget.settings.rutaCacheContinuaciones ?? '');
+    _rutaController = TextEditingController(
+      text: widget.settings.rutaCacheContinuaciones ?? '',
+    );
     _rutaFoco = FocusNode()..addListener(_alPerderElFocoDeRuta);
     unawaited(_medir());
   }
 
-  String get _rutaEfectiva =>
-      rutaEfectivaDeCacheContinuaciones(widget.settings.rutaCacheContinuaciones);
+  String get _rutaEfectiva => rutaEfectivaDeCacheContinuaciones(
+    widget.settings.rutaCacheContinuaciones,
+  );
 
   Future<void> _medir() async {
     var bytes = 0;
@@ -435,7 +413,9 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
 
   void _guardarRuta() {
     unawaited(
-      widget.settings.setRutaCacheContinuaciones(_rutaController.text).then((_) => _medir()),
+      widget.settings
+          .setRutaCacheContinuaciones(_rutaController.text)
+          .then((_) => _medir()),
     );
   }
 
@@ -476,11 +456,6 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Caché de reproducción', style: theme.textTheme.titleSmall),
-        Text(
-          'Una caché para que la reproducción sea fluida. En 0 se apaga.',
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-        ),
         Row(
           children: [
             Expanded(
@@ -491,7 +466,9 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
                 label: _etiqueta(valor),
                 onChanged: (v) => setState(() => _arrastrando = v),
                 onChangeEnd: (v) {
-                  unawaited(widget.settings.setLimiteCacheContinuaciones(v.round()));
+                  unawaited(
+                    widget.settings.setLimiteCacheContinuaciones(v.round()),
+                  );
                   setState(() => _arrastrando = null);
                 },
               ),
@@ -516,8 +493,9 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
             hintText: 'Vacío = la de por defecto',
             helperText: 'No mueve lo que ya haya en la carpeta anterior.',
             helperMaxLines: 2,
-            helperStyle: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            helperStyle: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             isDense: true,
             border: const OutlineInputBorder(),
           ),
@@ -530,8 +508,9 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
         Text('Se guarda en', style: theme.textTheme.labelSmall),
         SelectableText(
           _rutaEfectiva,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
         const SizedBox(height: 4),
         Row(
@@ -541,12 +520,14 @@ class _CacheDeContinuacionesState extends State<_CacheDeContinuaciones> {
                 _bytesEnDisco == null
                     ? 'Midiendo…'
                     : '${_enMB(_bytesEnDisco!)} en uso · '
-                        '${_cancionesEnDisco == 1 ? "1 canción" : "$_cancionesEnDisco canciones"}',
+                          '${_cancionesEnDisco == 1 ? "1 canción" : "$_cancionesEnDisco canciones"}',
                 style: theme.textTheme.bodySmall,
               ),
             ),
             TextButton(
-              onPressed: (_bytesEnDisco ?? 0) == 0 ? null : () => unawaited(_vaciar()),
+              onPressed: (_bytesEnDisco ?? 0) == 0
+                  ? null
+                  : () => unawaited(_vaciar()),
               child: const Text('Vaciar'),
             ),
           ],
