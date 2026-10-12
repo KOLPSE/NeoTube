@@ -351,14 +351,50 @@ fichero entero por yt-dlp (`_descargarCompletaConYtDlp`, deja el resultado en
 reproductor apuntando al fichero ya descargado y salta a la posición donde iba con
 `Media(archivo, start: posicion)` — dos ficheros de verdad sí se pueden encadenar así, sin
 corrupción. Se nota un parón de bien menos de un segundo en ese punto (parar, cargar el fichero
-nuevo, saltar), pero la canción sigue en vez de saltar a la siguiente. Los ficheros descargados
-se guardan en `Directory.systemTemp` y se limitan a los dos últimos (la pista actual y la
-anterior); de tres en adelante se van borrando solos.
+nuevo, saltar), pero la canción sigue en vez de saltar a la siguiente. Los ficheros viven en la
+caché de repuesto (`cacheDir()/continuaciones`, o la carpeta que el usuario elija en Ajustes) y
+se podan por antigüedad hasta el tope en MB de Ajustes (`_registrarContinuacion`).
 
 Si mañana vuelve a fallar algo con este aspecto: **medir el tamaño del trozo y comprobar en qué
 posición corta antes que sospechar del cliente o de las cabeceras** — ya se investigó por ahí
-una vez y no era eso. Y si se te ocurre "empalmar en la misma conexión", ya se probó: no
-funciona, y el porqué está arriba.
+una vez y no era eso. Para eso está `tool/probe_corte.dart`: resuelve una pista como lo hace la
+app y mide con `dart:io` puro en qué byte deja de servir. Y si se te ocurre "empalmar en la
+misma conexión", ya se probó: no funciona, y el porqué está arriba.
+
+### ⚠️ El repuesto falla a rachas, y un fallo se llevaba la canción por delante
+
+La descarga de repuesto **no es fiable**: a `web_embedded` YouTube le contesta `Requested format
+is not available` (en esa petición solo le ofrece el audio por SABR) durante ventanas de decenas
+de segundos. Medido sobre pistas reales de la caché, intercalando las variantes en la misma
+ventana de tiempo para que la comparación signifique algo:
+
+| lo que se pide | aciertos |
+|---|---|
+| `web_embedded`, anónimo | 19/24 |
+| `web_embedded,tv`, anónimo | 22/24 |
+| `web_embedded` **con las cookies de la cuenta** | 24/24 |
+
+Y el fallo **no es del vídeo**: la misma pista que falla baja entera en la ronda siguiente, a
+veces segundos después. El binario de yt-dlp tampoco es la variable (2026.07.04 contra
+2026.08.19, empatados).
+
+Con una sola tentativa, ese fallo se veía en la app como **la canción se salta sola**: la vía
+rápida se corta en el primer megabyte, `_continuarTrasCorte` no encontraba fichero y saltaba a
+la siguiente sin decir nada. De ahí el informe de "las canciones se saltan todo el rato".
+
+Ahora la descarga se intenta **tres veces** (`_clientesDeRepuesto`, con 4 s entre intentos y
+`tv` de acompañante en el último) y, si al llegar el corte todavía no hay fichero, se hace **un
+intento más ahí mismo** —han pasado casi dos minutos desde el primero— antes de saltar. Si aun
+así no hay forma, se salta **diciéndolo** (`No se pudo descargar el resto de esta pista.`) en
+vez de en silencio.
+
+Lo que **no** se usa, aunque lo parezca: el cliente por defecto de yt-dlp. Probado, sus URLs se
+cortan igual en la descarga (`HTTP Error 403`) en vez de bajar el fichero entero. Y las cookies
+de la cuenta se quedan fuera por ahora: son las que mejor miden, pero meten la sesión del
+usuario en un subproceso y eso es una decisión de producto, no un detalle técnico.
+
+Se comprueba en un par de minutos con `tool/probe_corte.dart` (dónde corta la vía rápida) y con
+yt-dlp a mano sobre una pista concreta (si el repuesto baja el fichero ahora mismo).
 
 ### ⚠️ `ANDROID_VR` sin `visitorData` es "confirma que no eres un bot"
 

@@ -608,6 +608,35 @@ class YtPlayer extends ChangeNotifier {
   /// completa de repuesto. Ver [_iniciarContinuacionConRetraso].
   static const _retrasoContinuacion = Duration(seconds: 4);
 
+  /// El cliente con el que se pide la copia de repuesto. Es el único que se ha
+  /// visto bajar el fichero entero (ver `yt_local_proxy.dart`).
+  static const _clienteDeRepuesto = 'web_embedded';
+
+  /// Qué se pide en cada intento de la descarga de repuesto, en orden, y
+  /// cuánto se espera entre uno y otro.
+  ///
+  /// ⚠️ **El fallo que los justifica no es del vídeo: va a rachas.** YouTube le
+  /// contesta a `web_embedded` que no hay ningún formato con URL
+  /// (`Requested format is not available`, porque en esa petición solo le
+  /// ofrece el audio por SABR) durante ventanas de decenas de segundos, y la
+  /// misma pista vuelve a bajarse entera un poco después. Medido sobre pistas
+  /// reales de la caché: 2 de 12 fallaron en el primer intento, y la misma
+  /// pista que fallaba bajaba entera en la ronda siguiente.
+  ///
+  /// Sin esto, un fallo de la descarga se convertía en que **la canción se
+  /// saltaba sola** al llegar al corte de la vía rápida (ver
+  /// [_continuarTrasCorte]): justo el síntoma que se reportó como "las
+  /// canciones se saltan todo el rato".
+  ///
+  /// El último intento añade `tv` a la lista de clientes en vez de repetir la
+  /// misma petición palabra por palabra: si `web_embedded` se ha quedado sin
+  /// formatos, los que aporte `tv` son otra vía al mismo audio. No se usa el
+  /// cliente por defecto de yt-dlp, que se probó y **no vale para esto**: sus
+  /// URLs se cortan igual en la descarga (`HTTP Error 403`) en vez de bajar el
+  /// fichero entero.
+  static const _clientesDeRepuesto = ['web_embedded', 'web_embedded', 'web_embedded,tv'];
+  static const _esperaEntreIntentos = Duration(seconds: 4);
+
   /// Lanza [_descargarCompletaConYtDlp] **solo si la pista sigue sonando**
   /// unos segundos después de abrirse.
   ///
@@ -646,7 +675,39 @@ class YtPlayer extends ChangeNotifier {
     }
     await Future<void>.delayed(_retrasoContinuacion);
     if (actual?.videoId != videoId) return null;
-    return _descargarCompletaConYtDlp(videoId);
+    return _descargarRepuestoConReintentos(videoId);
+  }
+
+  /// La descarga de repuesto, con reintentos. Ver [_clientesDeRepuesto].
+  ///
+  /// Los reintentos son baratos comparados con lo que cuesta no tenerlos: sin
+  /// copia de repuesto, la pista se corta en el primer megabyte y salta a la
+  /// siguiente. Van aquí y no en [_continuarTrasCorte] porque este es el
+  /// `Future` que se guarda en [_continuaciones] —el que espera quien retoma
+  /// tras el corte—, así que reintentar aquí cubre los dos caminos.
+  Future<File?> _descargarRepuestoConReintentos(String videoId) async {
+    for (var intento = 0; intento < _clientesDeRepuesto.length; intento++) {
+      if (intento > 0) {
+        await Future<void>.delayed(_esperaEntreIntentos);
+        // Mientras se esperaba, el usuario puede haber cambiado de pista: el
+        // repuesto era para la que sonaba, así que ya no hace falta.
+        if (actual?.videoId != videoId) return null;
+      }
+      final archivo = await _descargarCompletaConYtDlp(
+        videoId,
+        cliente: _clientesDeRepuesto[intento],
+      );
+      if (archivo != null) {
+        if (intento > 0) {
+          Log.i('repuesto de $videoId conseguido al intento ${intento + 1} '
+              '(${_clientesDeRepuesto[intento]})');
+        }
+        return archivo;
+      }
+      Log.w('repuesto de $videoId falló '
+          '(intento ${intento + 1} de ${_clientesDeRepuesto.length})');
+    }
+    return null;
   }
 
   Future<File?> _continuacionEnDisco(String videoId) async {
@@ -696,7 +757,7 @@ class YtPlayer extends ChangeNotifier {
   ///
   /// Devuelve `null` en vez de lanzar: quien llama ya está sonando por la vía
   /// rápida, y esto es un complemento, no algo de lo que dependa arrancar.
-  Future<File?> _descargarCompletaConYtDlp(String videoId) async {
+  Future<File?> _descargarCompletaConYtDlp(String videoId, {String? cliente = _clienteDeRepuesto}) async {
     final bin = findYtDlpBinary();
     if (bin == null) return null;
     final deno = findDenoBinary();
@@ -705,8 +766,9 @@ class YtPlayer extends ChangeNotifier {
       if (deno != null) ...['--js-runtimes', 'deno:${deno.path}'],
       '-f',
       'bestaudio',
-      '--extractor-args',
-      'youtube:player_client=web_embedded',
+      // `cliente` a `null` deja que yt-dlp use su orden por defecto; hoy nadie
+      // lo pide así a propósito (ver [_clientesDeRepuesto] y por qué).
+      if (cliente != null) ...['--extractor-args', 'youtube:player_client=$cliente'],
       '-o',
       destino.path,
       'https://www.youtube.com/watch?v=$videoId',
@@ -1093,15 +1155,36 @@ class YtPlayer extends ChangeNotifier {
     _pistaConCorte = null;
     final posicion = _mpv?.state.position ?? Duration.zero;
     final futuro = _continuaciones[t.videoId];
-    final archivo = futuro == null ? null : await futuro;
+    var archivo = futuro == null ? null : await futuro;
     // Si mientras se esperaba la descarga el usuario ya saltó de pista, no
     // hay nada que retomar: la pista actual es otra.
     if (actual?.videoId != t.videoId) return;
     if (archivo == null || !archivo.existsSync()) {
-      // No hay descarga de repuesto (falló, o no dio tiempo): se acepta el
-      // corte como si de verdad hubiera sido el final.
-      if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
-      return;
+      // Última tirada de dados, y aquí sí que hace falta: los fallos de
+      // YouTube van a rachas, y desde el intento de la descarga de repuesto
+      // hasta este momento han pasado los casi dos minutos que dura la mitad
+      // de la pista. Una pista que se pueda salvar, se salva; saltar es lo
+      // último, no lo primero.
+      Log.w('sin repuesto para ${t.videoId}: '
+          'se intenta una vez más antes de saltar');
+      archivo = await _descargarCompletaConYtDlp(
+        t.videoId,
+        // La misma cadena del último intento del repuesto: si `web_embedded`
+        // ya falló dos veces, lo que aporte `tv` es otra vía al mismo audio.
+        cliente: _clientesDeRepuesto.last,
+      );
+      if (actual?.videoId != t.videoId) return;
+      if (archivo == null || !archivo.existsSync()) {
+        // No hay forma de seguir: la vía rápida no sirve más allá del primer
+        // megabyte y sin fichero no hay nada que reabrir. Se salta, pero
+        // **diciéndolo** — saltar en silencio es exactamente lo que hacía
+        // pensar que las canciones "se saltaban solas".
+        Log.w('sin repuesto para ${t.videoId} tras el último intento: se salta');
+        error = 'No se pudo descargar el resto de esta pista.';
+        notifyListeners();
+        if (cola.isNotEmpty) unawaited(siguiente(automatico: true));
+        return;
+      }
     }
     Log.i('retomando ${t.videoId} desde $posicion tras el corte');
     _cambiando = true;
