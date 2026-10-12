@@ -3,13 +3,13 @@
 
 pkgname=neotube-bin
 _pkgname=neotube
-pkgver=1.2.0
+pkgver=1.2.1
 pkgrel=1
 pkgdesc="Cliente nativo de YouTube Music para escritorio"
 arch=('x86_64')
 url="https://github.com/KOLPSE/NeoTube"
 license=('MIT')
-depends=('gtk3' 'libayatana-appindicator' 'webkit2gtk-4.1' 'mpv')
+depends=('gtk3' 'libayatana-appindicator' 'libayatana-indicator' 'ayatana-ido' 'webkit2gtk-4.1' 'mpv')
 optdepends=('gnome-shell-extension-appindicator: icono de bandeja en GNOME')
 provides=("$_pkgname")
 conflicts=("$_pkgname")

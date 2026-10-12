@@ -12,3 +12,5 @@
 
 - **Overflow al plegar el sidebar.** El logo desbordaba durante la animación y pintaba la franja de error; corregido en raíz.
 - **Texto de Ajustes.** Fuera el microcopy que explicaba lo obvio o justificaba opciones.
+- **Las canciones ya no se saltan solas.** Pasado el primer minuto, la reproducción depende de una copia completa de la pista que se descarga en paralelo; cuando esa descarga fallaba, la canción saltaba a la siguiente sin decir nada. La descarga se reintenta ahora tres veces —y una más al llegar al corte—, y si aun así no hay forma, se avisa en pantalla en vez de saltar en silencio.
+- **Arch: el paquete ya arranca.** `libayatana-appindicator` dejó de arrastrar `libayatana-indicator` y `ayatana-ido`, y el `PKGBUILD` no los declaraba: el binario se quedaba sin dos librerías al abrir. Están añadidas a `depends=` y el pipeline lo comprueba antes de publicar.

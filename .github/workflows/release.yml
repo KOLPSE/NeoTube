@@ -192,9 +192,15 @@ jobs:
       - name: Dependencias del sistema
         # mpv y python se omiten a propósito: mpv debe ser resuelto por el PKGBUILD y python no hace falta.
         # pacman-contrib proporciona repo-add para la base de datos del repositorio pacman.
+        # ⚠️ libayatana-indicator y ayatana-ido tienen que estar en esta lista **y** en
+        # depends= del PKGBUILD: desde libayatana-appindicator 0.6.0-2 ese paquete ya no
+        # los arrastra, y sin ellos el binario no arranca en Arch (el paso de abajo es
+        # justo el que lo detecta). Ojo con el nombre: el paquete es `ayatana-ido`, no
+        # `libayatana-ido` — buscarlo por "libayatana" no lo encuentra.
         run: |
           pacman -Syu --noconfirm --needed \
-            gtk3 libayatana-appindicator webkit2gtk-4.1 \
+            gtk3 libayatana-appindicator libayatana-indicator ayatana-ido \
+            webkit2gtk-4.1 \
             base-devel sudo github-cli pacman-contrib xorg-server-xvfb xorg-xauth dbus
 
       - uses: actions/checkout@v4

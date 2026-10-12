@@ -7,7 +7,7 @@ import 'package:path/path.dart' as p;
 ///
 /// Esta constante es la única fuente de verdad para el instalador y el
 /// actualizador.
-const String kVersion = '1.2.0';
+const String kVersion = '1.2.1';
 
 /// Repositorio de donde salen las actualizaciones.
 const String kRepoGitHub = 'KOLPSE/NeoTube';

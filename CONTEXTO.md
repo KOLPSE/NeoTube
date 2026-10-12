@@ -758,6 +758,23 @@ No es negociable, cada paso rompe algo distinto si se mueve:
   Arch (`neotube-bin`); `mpv` va en su `depends=` — **no** se instala a mano en ningún paso
   de comprobación, tiene que llegar resolviéndolo el propio gestor de paquetes, o el
   problema del `dlopen` (sección 5) no se detecta.
+
+> ⚠️ **En Arch, `libayatana-appindicator` no basta, y el paquete de la otra mitad no se
+> llama como parece.** El tarball se compila en Ubuntu y se verifica en Arch, y ahí se
+> enlaza contra `libayatana-indicator3.so.7` y `libayatana-ido3-0.4.so.0`. Desde
+> `libayatana-appindicator 0.6.0-2` ese paquete **ya no los arrastra**, así que un
+> `depends=` con solo él deja el binario sin dos librerías y **la app no arranca** (no es
+> teoría: el paquete de v1.2.0 estaba así). Van los tres:
+>
+> ```
+> depends=('gtk3' 'libayatana-appindicator' 'libayatana-indicator' 'ayatana-ido' 'webkit2gtk-4.1' 'mpv')
+> ```
+>
+> Y ojo con el nombre al buscarlo: el que provee el `.so` de ido es **`ayatana-ido`**, no
+> `libayatana-ido` — buscar «libayatana» en los repositorios no lo encuentra, y `pacman -F`
+> solo responde después de un `pacman -Fy`. La lista del job `arch` del `release.yml` tiene
+> que llevar los mismos paquetes que `depends=`, porque el paso «Comprobar resolución de
+> librerías (.so)» compara el tarball contra lo que hay instalado ahí.
 - **`.github/workflows/release.yml`** dispara con cada tag `v*` y hace las dos cosas a la
   vez: compila el instalador de Windows, y en un contenedor `archlinux:latest` monta el
   paquete, lo instala de verdad con `pacman -U` y **arranca la app** (`dbus-run-session
