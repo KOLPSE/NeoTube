@@ -23,7 +23,6 @@ check:windows:
   stage: check
   tags:
     - windows
-  shell: pwsh
   script:
     - flutter pub get
     - flutter analyze
@@ -128,7 +127,6 @@ build:windows:
   needs:
     - job: check:windows
     - job: check:version
-  shell: pwsh
   script:
     - flutter pub get
     - powershell -ExecutionPolicy Bypass -File tool\fetch_ytdlp.ps1
