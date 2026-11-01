@@ -219,7 +219,7 @@ build:arch:
     # ⚠️ libayatana-indicator y ayatana-ido tienen que estar en esta lista **y**
     # en depends= del PKGBUILD: desde libayatana-appindicator 0.6.0-2 ese paquete
     # ya no los arrastra. Ojo con el nombre: el paquete es `ayatana-ido`.
-    - sudo pacman -Syu --noconfirm --needed
+    - sudo pacman -S --noconfirm --needed
       gtk3 libayatana-appindicator libayatana-indicator ayatana-ido
       webkit2gtk-4.1
       base-devel sudo github-cli pacman-contrib xorg-server-xvfb xorg-xauth dbus
