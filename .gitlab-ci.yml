@@ -1,0 +1,398 @@
+# Pipeline de NeoTube (YouTube nativo) en GitLab.
+#
+# Equivalente a los antiguos .github/workflows/ci.yml y release.yml.
+#
+# Tags de los runners:
+#   ubuntu  -> la VM de Ubuntu  (analiza, tests, bundle de Linux)
+#   windows -> la VM de Windows (instalador .exe)
+#   arch    -> la VM de Arch     (paquete pacman + repositorio)
+#   publish -> el propio servidor (sube las releases a GitHub)
+
+stages:
+  - check
+  - build
+  - publish
+
+variables:
+  GIT_DEPTH: "0"
+  FLUTTER_SUPPRESS_ANALYTICS: "true"
+  PUB_CACHE: "$CI_PROJECT_DIR/.pub-cache"
+
+# --------------------------------------------------------------------- checks
+check:windows:
+  stage: check
+  tags:
+    - windows
+  shell: pwsh
+  script:
+    - flutter pub get
+    - flutter analyze
+    - flutter test
+    - |
+      # La version sale de kVersion, no de pubspec.yaml: las dos tienen que
+      # decir lo mismo, que es lo que comprueba el workflow original.
+      $appConfig = Get-Content lib/core/app_config.dart -Raw
+      if ($appConfig -match "kVersion\s*=\s*'([^']+)'") {
+        $vConfig = $Matches[1]
+      } else {
+        Write-Error "No se pudo extraer kVersion de lib/core/app_config.dart"
+        exit 1
+      }
+
+      $pubspec = Get-Content pubspec.yaml -Raw
+      if ($pubspec -match "(?m)^version:\s*([0-9\.]+)") {
+        $vPubspec = $Matches[1]
+      } else {
+        Write-Error "No se pudo extraer version de pubspec.yaml"
+        exit 1
+      }
+
+      Write-Host "Version en app_config: $vConfig"
+      Write-Host "Version en pubspec:    $vPubspec"
+
+      if ($vConfig -ne $vPubspec) {
+        Write-Error "Inconsistencia de version: app_config ($vConfig) != pubspec ($vPubspec)"
+        exit 1
+      }
+      Write-Host "Las versiones coinciden: $vConfig"
+
+    - |
+      # Que no queden restos de NeoFy: 'neofy' en minusculas es la carpeta de
+      # datos antigua (app_config.dart la usa a proposito para migrar las
+      # cookies), y los comentarios historicos son documentacion util.
+      # Lo que esto tiene que pillar es "NeoFy" colandose en un texto que ve
+      # el usuario.
+      $coincidencias = Get-ChildItem -Path lib -Recurse -Filter "*.dart" |
+        Select-String -Pattern "NeoFy" -CaseSensitive |
+        Where-Object { $_.Line.Trim() -notmatch '^/{2,3}' }
+      if ($coincidencias) {
+        Write-Host "Se encontraron referencias a 'NeoFy' en lib/ (fuera de comentarios):"
+        $coincidencias | ForEach-Object { Write-Host "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())" }
+        Write-Error "Quedan $($coincidencias.Count) referencias a 'NeoFy' en lib/ que deben ser saneadas."
+        exit 1
+      }
+      Write-Host "Comprobacion limpia: no hay restos de 'NeoFy' en lib/."
+  cache:
+    key: "neotube-flutter-win"
+    paths:
+      - .pub-cache
+    policy: pull-push
+
+check:ubuntu:
+  stage: check
+  tags:
+    - ubuntu
+  before_script:
+    - sudo apt-get update
+    - sudo apt-get install -y --no-install-recommends clang cmake ninja-build pkg-config libgtk-3-dev
+  script:
+    - flutter pub get
+    - flutter analyze
+    - flutter test
+  cache:
+    key: "neotube-flutter-ubuntu"
+    paths:
+      - .pub-cache
+    policy: pull-push
+
+# --------------------------------------------------------------------- builds
+# Lo primero de todo, y a proposito: si el tag no cuadra con la version del
+# codigo, no se compila nada. La version sale de kVersion en app_config.dart,
+# no de pubspec.yaml.
+check:version:
+  stage: build
+  tags:
+    - ubuntu
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - |
+      set -euo pipefail
+      tag="${CI_COMMIT_TAG#v}"
+      kver="$(grep -oP "kVersion\s*=\s*'\K[^']+" lib/core/app_config.dart)"
+      pver="$(grep -oP '^version:\s*\K[0-9.]+' pubspec.yaml)"
+      pkgver="$(grep -oP '^pkgver=\K[0-9.]+' linux/packaging/PKGBUILD)"
+      echo "tag=$tag  kVersion=$kver  pubspec=$pver  PKGBUILD=$pkgver"
+      fallo=0
+      [ "$tag" = "$kver" ]   || { echo "ERROR: kVersion es $kver y el tag v$tag"; fallo=1; }
+      [ "$tag" = "$pver" ]   || { echo "ERROR: pubspec es $pver y el tag v$tag"; fallo=1; }
+      [ "$tag" = "$pkgver" ] || { echo "ERROR: PKGBUILD es $pkgver y el tag v$tag"; fallo=1; }
+      exit $fallo
+
+build:windows:
+  stage: build
+  tags:
+    - windows
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: check:windows
+    - job: check:version
+  shell: pwsh
+  script:
+    - flutter pub get
+    - powershell -ExecutionPolicy Bypass -File tool\fetch_ytdlp.ps1
+    - powershell -ExecutionPolicy Bypass -File tool\fetch_deno.ps1
+    - flutter build windows --release
+    - |
+      # Inno Setup 6: si no esta, se descarga y se instala en silencio.
+      $iscc = @(
+        "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
+        "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
+        "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+      ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+      if (-not $iscc) {
+        Write-Host "Descargando y instalando Inno Setup 6..."
+        $installer = Join-Path $env:TEMP 'is_setup.exe'
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri "https://github.com/jrsoftware/issrc/releases/download/is-6_3_3/innosetup-6.3.3.exe" -OutFile $installer -UseBasicParsing
+        Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+        $cmdIscc = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+        if ($cmdIscc) { $iscc = $cmdIscc.Source }
+      }
+      if (-not $iscc) { throw "Falta Inno Setup 6 (ISCC.exe)" }
+
+      $appConfig = Get-Content "lib\core\app_config.dart" -Raw
+      if ($appConfig -notmatch "kVersion\s*=\s*'([^']+)'") {
+        throw "No se encontro kVersion en app_config.dart"
+      }
+      $version = $Matches[1]
+      Write-Host "Version detectada: $version"
+
+      New-Item -ItemType Directory -Force -Path dist | Out-Null
+      & $iscc /Q "/DVersion=$version" "installer\neotube.iss"
+      if ($LASTEXITCODE -ne 0) { throw "ISCC fallo al compilar el instalador" }
+  artifacts:
+    name: "neotube-windows-$CI_COMMIT_TAG"
+    paths:
+      - dist/NeoTube-*-windows-x64.exe
+    expire_in: 3 days
+
+build:linux:
+  stage: build
+  tags:
+    - ubuntu
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: check:ubuntu
+    - job: check:version
+  before_script:
+    - sudo apt-get update
+    - sudo apt-get install -y --no-install-recommends
+      clang cmake ninja-build pkg-config libgtk-3-dev
+      libayatana-appindicator3-dev libwebkit2gtk-4.1-dev
+  script:
+    - flutter pub get
+    - bash ./tool/fetch_ytdlp.sh
+    - bash ./tool/fetch_deno.sh
+    - bash ./tool/build_linux_bundle.sh
+    - |
+      set -euo pipefail
+      tar -tzf dist/NeoTube-*-linux-x86_64.tar.gz > /tmp/tarball.txt
+      for f in neotube yt-dlp deno
+               xyz.neogex.neotube.desktop LICENSE
+               data/icudtl.dat lib/libapp.so lib/libflutter_linux_gtk.so; do
+        grep -q "/$f\$" /tmp/tarball.txt || { echo "ERROR: El tarball no trae $f"; exit 1; }
+      done
+      tar -xzf dist/NeoTube-*-linux-x86_64.tar.gz -C /tmp
+      /tmp/NeoTube-*-linux-x86_64/yt-dlp --version
+      /tmp/NeoTube-*-linux-x86_64/deno --version
+      echo "Tarball verificado con exito."
+  artifacts:
+    name: "neotube-linux-$CI_COMMIT_TAG"
+    paths:
+      - dist/NeoTube-*-linux-x86_64.tar.gz
+    expire_in: 3 days
+
+build:arch:
+  stage: build
+  tags:
+    - arch
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: build:linux
+      artifacts: true
+  before_script:
+    # mpv y python se omiten a proposito: mpv debe ser resuelto por el PKGBUILD
+    # y python no hace falta. pacman-contrib proporciona repo-add.
+    # ⚠️ libayatana-indicator y ayatana-ido tienen que estar en esta lista **y**
+    # en depends= del PKGBUILD: desde libayatana-appindicator 0.6.0-2 ese paquete
+    # ya no los arrastra. Ojo con el nombre: el paquete es `ayatana-ido`.
+    - pacman -Syu --noconfirm --needed
+      gtk3 libayatana-appindicator libayatana-indicator ayatana-ido
+      webkit2gtk-4.1
+      base-devel sudo github-cli pacman-contrib xorg-server-xvfb xorg-xauth dbus
+  script:
+    - |
+      set -euo pipefail
+      tar -xzf dist/NeoTube-*-linux-x86_64.tar.gz
+      cd NeoTube-*-linux-x86_64
+      fallo=0
+      for bin in neotube yt-dlp deno; do
+        faltan="$(ldd "$bin" 2>&1 | grep 'not found' || true)"
+        if [ -n "$faltan" ]; then
+          echo "ERROR: $bin no encuentra:"; echo "$faltan"; fallo=1
+        else
+          echo "ok $bin"
+        fi
+      done
+      for so in lib/*.so; do
+        faltan="$(LD_LIBRARY_PATH="$PWD/lib" ldd "$so" 2>&1 | grep 'not found' || true)"
+        if [ -n "$faltan" ]; then
+          echo "ERROR: $so no encuentra:"; echo "$faltan"; fallo=1
+        fi
+      done
+      [ "$fallo" = 0 ] || exit 1
+      echo "Todos los binarios resuelven sus dependencias en Arch."
+
+    - |
+      set -euo pipefail
+      version="$(grep -oP "kVersion\s*=\s*'\K[^']+" lib/core/app_config.dart)"
+      pkgver="$(grep -oP '^pkgver=\K.*' linux/packaging/PKGBUILD)"
+      echo "kVersion=$version  pkgver=$pkgver"
+      [ "$version" = "$pkgver" ] || {
+        echo "ERROR: linux/packaging/PKGBUILD tiene pkgver=$pkgver pero kVersion es $version"
+        exit 1
+      }
+
+    - |
+      set -euo pipefail
+      useradd -m builder
+      mkdir -p /tmp/pkg
+      cp linux/packaging/PKGBUILD /tmp/pkg/
+      cp dist/NeoTube-*-linux-x86_64.tar.gz /tmp/pkg/
+      sed -i 's|^source=.*|source=("$_tarball.tar.gz")|' /tmp/pkg/PKGBUILD
+      sed -i "s|^sha256sums=.*|sha256sums=('SKIP')|" /tmp/pkg/PKGBUILD
+      chown -R builder /tmp/pkg
+      sudo -u builder bash -c 'cd /tmp/pkg && makepkg -f --nodeps --noconfirm'
+      ls -la /tmp/pkg/*.pkg.tar.zst
+
+    - |
+      set -euo pipefail
+      install -dm755 /tmp/srcinfo
+      cp linux/packaging/PKGBUILD /tmp/srcinfo/
+      chown -R builder /tmp/srcinfo
+      sudo -u builder bash -c 'cd /tmp/srcinfo && makepkg --printsrcinfo'
+
+    - |
+      set -euo pipefail
+      pacman -U --noconfirm /tmp/pkg/neotube-bin-*.pkg.tar.zst
+      test -x /opt/neotube/neotube || { echo "ERROR: falta /opt/neotube/neotube"; exit 1; }
+      test -x /opt/neotube/yt-dlp || { echo "ERROR: falta /opt/neotube/yt-dlp"; exit 1; }
+      /opt/neotube/yt-dlp --version || { echo "ERROR: yt-dlp no arranca"; exit 1; }
+      test -x /opt/neotube/deno || { echo "ERROR: falta /opt/neotube/deno"; exit 1; }
+      /opt/neotube/deno --version || { echo "ERROR: deno no arranca"; exit 1; }
+      test -d /opt/neotube/data || { echo "ERROR: falta data/"; exit 1; }
+      test -L /usr/bin/neotube || { echo "ERROR: /usr/bin/neotube no es un enlace"; exit 1; }
+      test -f /usr/share/applications/xyz.neogex.neotube.desktop || { echo "ERROR: falta el .desktop"; exit 1; }
+      test -f /usr/share/icons/hicolor/256x256/apps/neotube.png  || { echo "ERROR: falta el icono 256"; exit 1; }
+      [ "$(readlink -f /usr/bin/neotube)" = /opt/neotube/neotube ] || {
+        echo "ERROR: el enlace apunta a $(readlink -f /usr/bin/neotube)"; exit 1; }
+      echo "Instalado correctamente en Arch."
+
+    - |
+      set -euo pipefail
+      export HOME=/root
+      dbus-run-session -- xvfb-run -a /usr/bin/neotube > /tmp/neotube.log 2>&1 &
+      pid=$!
+      sleep 25
+      if ! kill -0 "$pid" 2>/dev/null; then
+        echo "ERROR: neotube se ha caido durante el arranque"
+        cat /tmp/neotube.log
+        exit 1
+      fi
+      kill "$pid" 2>/dev/null || true
+      if grep -q 'sin libmpv' /tmp/neotube.log; then
+        echo "ERROR: arranco sin libmpv: revisa que 'mpv' siga en depends= del PKGBUILD"
+        cat /tmp/neotube.log
+        exit 1
+      fi
+      echo "Arranca de verdad y con audio disponible."
+  artifacts:
+    name: "neotube-arch-$CI_COMMIT_TAG"
+    paths:
+      - /tmp/pkg/*.pkg.tar.zst
+    expire_in: 3 days
+
+# -------------------------------------------------------------------- publish
+publish:github:
+  stage: publish
+  tags:
+    - publish
+  rules:
+    - if: $CI_COMMIT_TAG
+  needs:
+    - job: build:windows
+      artifacts: true
+    - job: build:linux
+      artifacts: true
+    - job: build:arch
+      artifacts: true
+  variables:
+    GH_TOKEN: $GITHUB_TOKEN
+  script:
+    - |
+      set -euo pipefail
+      TAG="${CI_COMMIT_TAG}"
+      REPO="KOLPSE/NeoTube"
+
+      gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1 \
+        || gh release create "$TAG" --repo "$REPO" \
+             --title "NeoTube ${TAG#v}" --notes-file RELEASE_NOTES.md
+
+      gh release upload "$TAG" dist/NeoTube-*-windows-x64.exe --repo "$REPO" --clobber
+      gh release upload "$TAG" dist/NeoTube-*-linux-x86_64.tar.gz --repo "$REPO" --clobber
+      echo "Release $TAG actualizada en $REPO"
+
+    - |
+      set -euo pipefail
+      TAG="${CI_COMMIT_TAG}"
+      REPO="KOLPSE/NeoTube"
+      pkg="$(ls /tmp/pkg/neotube-bin-*.pkg.tar.zst)"
+      nombre="$(basename "$pkg")"
+
+      gh release upload "$TAG" "$pkg" --repo "$REPO" --clobber
+      echo "Paquete Arch subido a $TAG"
+
+      cd /tmp/pkg
+      repo-add neotube.db.tar.gz "$nombre"
+      # repo-add deja neotube.db y neotube.files como enlaces simbolicos, y una
+      # release de GitHub no guarda enlaces: se suben como ficheros reales.
+      rm -f neotube.db neotube.files
+      cp neotube.db.tar.gz neotube.db
+      cp neotube.files.tar.gz neotube.files
+
+      cat > /tmp/notas-repo.md <<'NOTAS'
+      Esta release **no contiene una version de NeoTube**: es el repositorio
+      pacman para Arch. Su etiqueta no cambia nunca, para que la url que se
+      pone en `pacman.conf` siga siendo valida version tras version. Las
+      versiones de verdad estan en la lista de releases.
+
+      En `/etc/pacman.conf`, al final:
+
+          [neotube]
+          SigLevel = Optional TrustAll
+          Server = https://github.com/KOLPSE/NeoTube/releases/download/repo
+
+      Y despues:
+
+          sudo pacman -Sy neotube-bin
+
+      A partir de ahi se actualiza con el resto del sistema en cada
+      `sudo pacman -Syu`.
+      NOTAS
+      sed -i 's/^          //' /tmp/notas-repo.md
+
+      if ! gh release view repo >/dev/null 2>&1; then
+        gh release create repo --latest=false \
+          --title 'Repositorio pacman para Arch (no es una version)' \
+          --notes-file /tmp/notas-repo.md
+      fi
+
+      gh release upload repo \
+        "$nombre" neotube.db neotube.files neotube.db.tar.gz neotube.files.tar.gz \
+        --clobber
+      echo "  repositorio pacman actualizado con $nombre"
