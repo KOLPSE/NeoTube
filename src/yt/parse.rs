@@ -57,7 +57,9 @@ pub const SHELF_RENDERERS: &[&str] = &[
 ];
 
 fn as_array(v: Option<&Value>) -> &[Value] {
-    v.and_then(|x| x.as_array()).map(|a| a.as_slice()).unwrap_or(&[])
+    v.and_then(|x| x.as_array())
+        .map(|a| a.as_slice())
+        .unwrap_or(&[])
 }
 
 /// `node[key]` como array (vacío si no lo es).
@@ -135,7 +137,11 @@ pub fn find_key<'a>(node: &'a Value, key: &str) -> Option<&'a Value> {
 /// Recoge `(nombre_del_renderer, nodo)` de todos los descendientes cuyo nombre
 /// esté en `wanted`, **sin** bajar dentro de un renderer ya recogido: así un
 /// `gridVideoRenderer` anidado no se cuenta dos veces.
-pub fn collect<'a>(node: &'a Value, wanted: &[&'static str], out: &mut Vec<(&'static str, &'a Value)>) {
+pub fn collect<'a>(
+    node: &'a Value,
+    wanted: &[&'static str],
+    out: &mut Vec<(&'static str, &'a Value)>,
+) {
     match node {
         Value::Object(map) => {
             for key in wanted {
@@ -467,7 +473,10 @@ pub fn card_from(renderer: &str, node: &Value) -> Option<Card> {
         "reelItemRenderer" => {
             let id = node.get("videoId").and_then(|v| v.as_str())?.to_string();
             let mut card = Card::new(id, MediaKind::Short, text_at(node, &["headline"]));
-            card.author = text_at(node, &["navigationEndpoint", "reelWatchEndpoint", "owner", "name"]);
+            card.author = text_at(
+                node,
+                &["navigationEndpoint", "reelWatchEndpoint", "owner", "name"],
+            );
             card.meta = text_at(node, &["viewCountText"]);
             card.thumbs = thumbs_of(node);
             card.badge = Some("SHORTS".into());
@@ -595,10 +604,7 @@ pub fn card_from(renderer: &str, node: &Value) -> Option<Card> {
             }
             let mut card = Card::new(id, kind, title);
             card.thumbs = thumbs_of(node);
-            card.meta = join_meta(&[
-                text_at(node, &["subtitle"]),
-                text_at(node, &["subtitle2"]),
-            ]);
+            card.meta = join_meta(&[text_at(node, &["subtitle"]), text_at(node, &["subtitle2"])]);
             card.playlist_id = ep.playlist_id;
             Some(card)
         }
@@ -664,11 +670,7 @@ fn flex_columns(node: &Value) -> Vec<String> {
     }
     if out.is_empty() {
         // musicMultiRowListItemRenderer usa `title` + `subtitle`.
-        for path in [
-            vec!["title"],
-            vec!["subtitle"],
-            vec!["secondSubtitle"],
-        ] {
+        for path in [vec!["title"], vec!["subtitle"], vec!["secondSubtitle"]] {
             let t = text_at(node, &path);
             if !t.trim().is_empty() {
                 out.push(t.trim().to_string());
@@ -683,10 +685,7 @@ fn item_title(node: &Value) -> String {
     if !direct.trim().is_empty() {
         return direct.trim().to_string();
     }
-    flex_columns(node)
-        .first()
-        .cloned()
-        .unwrap_or_default()
+    flex_columns(node).first().cloned().unwrap_or_default()
 }
 
 fn join_meta(parts: &[String]) -> String {
@@ -706,7 +705,13 @@ pub fn shelf_title(node: &Value) -> Option<String> {
         vec!["header", "musicCarouselShelfBasicHeaderRenderer", "title"],
         vec!["header", "musicShelfRenderer", "title"],
         vec!["header", "richShelfRenderer", "title"],
-        vec!["header", "richSectionRenderer", "content", "richShelfRenderer", "title"],
+        vec![
+            "header",
+            "richSectionRenderer",
+            "content",
+            "richShelfRenderer",
+            "title",
+        ],
         vec!["header", "gridHeaderRenderer", "title"],
         vec!["title"],
     ] {
@@ -777,7 +782,9 @@ pub fn approximate_views(meta: &str) -> u64 {
     let lower = meta.to_lowercase();
     let cleaned: String = lower
         .chars()
-        .filter(|c| c.is_ascii_digit() || *c == '.' || *c == ',' || *c == 'k' || *c == 'm' || *c == 'b')
+        .filter(|c| {
+            c.is_ascii_digit() || *c == '.' || *c == ',' || *c == 'k' || *c == 'm' || *c == 'b'
+        })
         .collect();
     let number: String = cleaned
         .chars()

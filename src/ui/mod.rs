@@ -15,9 +15,18 @@
 
 pub mod actions;
 pub mod app;
+pub mod icons;
 pub mod login;
 pub mod screens;
+pub mod shell;
 pub mod tasks;
 pub mod theme;
 pub mod thumbs;
 pub mod widgets;
+
+/// Traza de diagnóstico mientras se pule la interfaz contra las capturas.
+/// Escribe a stderr para que se vea en `journalctl`/consola sin configurar
+/// `env_logger`; se retira cuando la verificación visual termine.
+pub fn dbg_log(message: String) {
+    eprintln!("[neotube] {message}");
+}

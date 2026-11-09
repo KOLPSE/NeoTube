@@ -63,9 +63,8 @@ impl Innertube {
     /// Se pide con `User-Agent` de Safari: es a un navegador a quien se le
     /// sirve el HTML que trae `visitorData` y el `sts` dentro.
     pub async fn video_page_context(&self, video_id: &str) -> PageContext {
-        let url = format!(
-            "https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1"
-        );
+        let url =
+            format!("https://www.youtube.com/watch?v={video_id}&bpctr=9999999999&has_verified=1");
         let mut ctx = PageContext::default();
         let Ok(res) = self
             .http
@@ -138,7 +137,10 @@ impl Innertube {
             .post(url)
             .header("Content-Type", "application/json")
             .header("User-Agent", VISIONOS_USER_AGENT)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
             .header("Accept-Language", "en-us,en;q=0.5")
             .header("X-Youtube-Client-Name", VISIONOS_CLIENT_NUMBER)
             .header("X-Youtube-Client-Version", VISIONOS_CLIENT_VERSION)
@@ -309,7 +311,10 @@ struct RawFormat {
 fn collect_formats(json: &Value) -> Vec<RawFormat> {
     let mut out = Vec::new();
     for key in ["formats", "adaptiveFormats"] {
-        let Some(list) = json.get("streamingData").and_then(|s| s.get(key)).and_then(|f| f.as_array())
+        let Some(list) = json
+            .get("streamingData")
+            .and_then(|s| s.get(key))
+            .and_then(|f| f.as_array())
         else {
             continue;
         };
@@ -360,7 +365,9 @@ fn to_track(f: &RawFormat) -> StreamTrack {
         height: f.height,
         fps: f.fps,
         audio_channels: f.channels,
-        approx_duration_ms: f.content_length.map(|c| c * 8 / f.bitrate.max(1) * 1000 / 1000),
+        approx_duration_ms: f
+            .content_length
+            .map(|c| c * 8 / f.bitrate.max(1) * 1000 / 1000),
     }
 }
 
@@ -410,7 +417,9 @@ fn pick_muxed(formats: &[RawFormat]) -> Option<StreamTrack> {
         .find(|f| f.itag == 18 && f.mime.starts_with("video/"))
         .or_else(|| {
             // Cualquier formato con `audioQuality` es muxado.
-            formats.iter().find(|f| f.mime.starts_with("video/") && f.height.is_some() && f.itag == 22)
+            formats
+                .iter()
+                .find(|f| f.mime.starts_with("video/") && f.height.is_some() && f.itag == 22)
         })
         .map(to_track)
 }
@@ -485,7 +494,13 @@ mod tests {
         };
         let formats = vec![
             mk(313, "video/webm; codecs=\"vp9\"", 2160, 25, 18_076_636),
-            mk(137, "video/mp4; codecs=\"avc1.640028\"", 1080, 25, 4_334_157),
+            mk(
+                137,
+                "video/mp4; codecs=\"avc1.640028\"",
+                1080,
+                25,
+                4_334_157,
+            ),
             mk(248, "video/webm; codecs=\"vp9\"", 1080, 25, 1_549_172),
         ];
         let best = pick_video(&formats, Some(1080)).unwrap();

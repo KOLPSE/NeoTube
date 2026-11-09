@@ -87,7 +87,7 @@ pub fn search(
                     ui.label(
                         egui::RichText::new("Cargando más resultados…")
                             .size(13.0)
-                            .color(p.text_secondary),
+                            .color(p.text2),
                     );
                 });
             }

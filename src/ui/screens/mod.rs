@@ -11,6 +11,7 @@ pub mod music;
 pub mod search;
 pub mod settings;
 pub mod shorts;
+pub mod subscriptions;
 pub mod watch;
 
 pub use channel::channel;
@@ -20,4 +21,5 @@ pub use music::{album, artist, music_home, playlist};
 pub use search::search;
 pub use settings::settings;
 pub use shorts::shorts;
+pub use subscriptions::subscriptions;
 pub use watch::watch;

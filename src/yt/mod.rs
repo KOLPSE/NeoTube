@@ -3,6 +3,7 @@
 
 pub mod api;
 pub mod client;
+pub mod comments;
 pub mod parse;
 pub mod stream;
 

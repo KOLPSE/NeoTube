@@ -17,12 +17,14 @@ use crate::domain::{
 use crate::playback::engine::{Engine, State as PlayerState};
 use crate::playback::queue::Queue;
 use crate::ui::actions::{Load, Payload, TaskDone, TaskIds, TaskKind};
+use crate::ui::icons::{self as icons_mod, Icon};
 use crate::ui::login::LoginOutcome;
 use crate::ui::screens;
+use crate::ui::shell::{self, ShellIntent};
 use crate::ui::tasks;
 use crate::ui::theme::{metrics, palette};
 use crate::ui::thumbs::{LoadedThumb, ThumbCache};
-use crate::ui::widgets::{self, draw_icon, Icon};
+use crate::ui::widgets;
 use crate::AppContext;
 
 /// Lo que el usuario ha pedido en una pantalla.
@@ -34,6 +36,8 @@ pub enum Intent {
     Reload,
     /// Abrir la página de un contenido.
     Open(Card),
+    /// Abrir el menú contextual de una tarjeta.
+    CardMenu(Card),
     /// Reproducir ya.
     PlayNow(Card),
     /// Añadir a la cola sin cambiar lo que suena.
@@ -49,11 +53,19 @@ pub enum Intent {
     PreviousTrack,
     SeekFraction(f32),
     SeekSeconds(f64),
-    ToggleLike { video_id: String, on: bool },
-    ToggleSubscribe { channel_id: String, on: bool },
+    ToggleLike {
+        video_id: String,
+        on: bool,
+    },
+    ToggleSubscribe {
+        channel_id: String,
+        on: bool,
+    },
     ToggleQueue,
     HomeChip(String),
-    SearchFilter { params: Option<String> },
+    SearchFilter {
+        params: Option<String>,
+    },
     ChannelTab(usize),
     ShortsNext,
     ShortsPrevious,
@@ -65,6 +77,34 @@ pub enum Intent {
     LoginWithCookies(String),
     Logout,
     SetMaxHeight(Option<u32>),
+    /// Cambiar entre tema claro y oscuro.
+    SetTheme(bool),
+    /// Mostrar u ocultar la barra lateral desplegada.
+    ToggleSidebar,
+    /// Abrir o cerrar el panel de notificaciones.
+    ToggleNotifications,
+    /// Abrir o cerrar el menú de perfil.
+    ToggleProfileMenu,
+    /// Abrir una URL en el navegador del sistema.
+    OpenExternal(String),
+    /// Cambiar la pestaña de un canal.
+    SetChannelTab(usize),
+    /// Cargar más resultados de la pantalla actual.
+    LoadMore,
+    /// Expandir o plegar la descripción del vídeo.
+    ToggleDescription,
+    /// Mostrar u ocultar el panel de comentarios (en Shorts cambia el reparto
+    /// de espacio; en vídeo, cuántos se listan).
+    ToggleComments,
+    /// Publicar un comentario con ese texto.
+    PostComment(String),
+    /// Me gusta / no me gusta en un comentario.
+    RateComment {
+        comment_id: String,
+        up: bool,
+    },
+    /// Mostrar u ocultar el panel de playlist de la página de vídeo.
+    TogglePlaylistPanel,
     SetVolume(f32),
     ToggleShuffle,
     CycleRepeat,
@@ -125,6 +165,9 @@ pub struct App {
 
     watch_info: Option<WatchInfo>,
     watch_load: Load,
+    /// Tarjetas de la sección Shorts del inicio (independientes del feed de
+    /// Shorts a pantalla completa: aquí son una fila, no un reproductor).
+    home_shorts: Vec<Card>,
     shorts_cards: Vec<Card>,
     shorts_index: usize,
     shorts_load: Load,
@@ -143,6 +186,47 @@ pub struct App {
     login_error: Option<String>,
     show_login: bool,
     toast: Option<(String, std::time::Instant)>,
+
+    // --- estructura global (cabecera, barra lateral, overlays)
+    /// Estado de la barra lateral (Mostrar más / Mostrar menos).
+    sidebar: crate::ui::shell::SidebarState,
+    /// Panel de notificaciones abierto.
+    show_notifications: bool,
+    /// Menú de perfil abierto.
+    show_profile: bool,
+    /// Menú contextual de una tarjeta: (tarjeta, posición donde se abrió).
+    card_menu: Option<(Card, egui::Pos2)>,
+    /// Descripción del vídeo expandida.
+    description_open: bool,
+    /// Panel de comentarios abierto (afecta a vídeo y a Shorts).
+    comments_open: bool,
+    /// Texto que se está escribiendo como comentario.
+    comment_input: String,
+    /// Comentarios del vídeo actual.
+    comments: Vec<crate::yt::comments::Comment>,
+    comments_load: Load,
+    /// Playlist lateral de la página de vídeo.
+    playlist_panel: Vec<Card>,
+    playlist_panel_title: Option<String>,
+    playlist_open: bool,
+    /// Notificaciones ya cargadas.
+    notifications: Vec<crate::ui::shell::NotificationView>,
+    notifications_load: Load,
+    /// Suscripciones para la barra lateral: (nombre, avatar, en_directo).
+    subscriptions: Vec<(String, crate::domain::Thumbs, bool)>,
+    /// Resultado de la petición de notificaciones.
+    /// Resultado de la carga de comentarios.
+    comments_tx: Sender<Result<crate::yt::comments::CommentsPage, crate::yt::client::ApiError>>,
+    comments_rx: Receiver<Result<crate::yt::comments::CommentsPage, crate::yt::client::ApiError>>,
+    /// Resultado de publicar un comentario.
+    comment_tx: Sender<Result<(), crate::yt::client::ApiError>>,
+    comment_rx: Receiver<Result<(), crate::yt::client::ApiError>>,
+    /// Shorts del inicio.
+    shorts_tx: Sender<Vec<Card>>,
+    shorts_rx: Receiver<Vec<Card>>,
+    notify_tx: Sender<Result<Vec<crate::yt::comments::Notification>, crate::yt::client::ApiError>>,
+    notify_rx:
+        Receiver<Result<Vec<crate::yt::comments::Notification>, crate::yt::client::ApiError>>,
 
     tasks: TaskIds,
     tx: Sender<TaskDone>,
@@ -167,6 +251,10 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let (login_tx, login_rx) = std::sync::mpsc::channel();
         let (thumb_tx, thumb_rx) = std::sync::mpsc::channel();
+        let (notify_tx, notify_rx) = std::sync::mpsc::channel();
+        let (shorts_tx, shorts_rx) = std::sync::mpsc::channel();
+        let (comment_tx, comment_rx) = std::sync::mpsc::channel();
+        let (comments_tx, comments_rx) = std::sync::mpsc::channel();
         let http = reqwest::Client::new();
 
         let dark = ctx.store.get_setting("theme").as_deref() != Some("light");
@@ -198,6 +286,7 @@ impl App {
             library_state: ScreenState::default(),
             watch_info: None,
             watch_load: Load::Idle,
+            home_shorts: Vec::new(),
             shorts_cards: Vec::new(),
             shorts_index: 0,
             shorts_load: Load::Idle,
@@ -215,6 +304,32 @@ impl App {
             login_error: None,
             show_login: false,
             toast: None,
+            sidebar: crate::ui::shell::SidebarState {
+                show_all_subscriptions: false,
+                show_all_explore: false,
+            },
+            show_notifications: false,
+            show_profile: false,
+            card_menu: None,
+            description_open: false,
+            comments_open: false,
+            comment_input: String::new(),
+            comments: Vec::new(),
+            comments_load: Load::Idle,
+            playlist_panel: Vec::new(),
+            playlist_panel_title: None,
+            playlist_open: true,
+            notifications: Vec::new(),
+            notifications_load: Load::Idle,
+            subscriptions: Vec::new(),
+            comments_tx,
+            comments_rx,
+            comment_tx,
+            comment_rx,
+            shorts_tx,
+            shorts_rx,
+            notify_tx,
+            notify_rx,
             tasks: TaskIds::default(),
             tx,
             rx,
@@ -226,7 +341,18 @@ impl App {
             http,
         };
         app.account = app.ctx.session.account();
-        app.load_home();
+        // Pantalla inicial: por defecto, Inicio. `NEOTUBE_START` permite abrir
+        // directamente en otra (útil para capturas de verificación y, más
+        // adelante, para abrir enlaces `neotube://`).
+        let start = std::env::var("NEOTUBE_START").unwrap_or_default();
+        if let Some(video_id) = start.strip_prefix("watch:") {
+            app.route = Route::Watch {
+                video_id: video_id.to_string(),
+            };
+            app.on_route_loaded(&app.route.clone());
+        } else {
+            app.load_home();
+        }
         app.refresh_account();
         Ok(app)
     }
@@ -245,6 +371,41 @@ impl App {
         );
     }
 
+    /// Pide los comentarios del vídeo. Solo con sesión: sin ella YouTube los
+    /// devuelve igual, pero el orden y el recuento cambian y no se puede
+    /// escribir; se avisa en la propia sección.
+    fn load_comments(&mut self, video_id: &str) {
+        if !self.ctx.session.is_logged_in() {
+            self.comments_load = Load::Ready;
+            self.comments.clear();
+            return;
+        }
+        self.comments_load = Load::Loading;
+        let api = self.ctx.api.clone();
+        let tx = self.comments_tx.clone();
+        let video_id = video_id.to_string();
+        self.runtime.spawn(async move {
+            let result = api.comments(&video_id).await;
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Pide las notificaciones de la cuenta. Si no hay sesión, el panel ya lo
+    /// explica; no se llama a la red.
+    fn load_notifications(&mut self) {
+        if !self.ctx.session.is_logged_in() {
+            self.notifications_load = Load::Ready;
+            return;
+        }
+        self.notifications_load = Load::Loading;
+        let api = self.ctx.api.clone();
+        let tx = self.notify_tx.clone();
+        self.runtime.spawn(async move {
+            let result = api.notifications().await;
+            let _ = tx.send(result);
+        });
+    }
+
     fn refresh_account(&mut self) {
         self.spawn(TaskKind::Account);
     }
@@ -254,6 +415,21 @@ impl App {
     fn load_home(&mut self) {
         self.home.load = Load::Loading;
         self.spawn(TaskKind::Home);
+        // La fila de Shorts del inicio es contenido distinto del feed: si
+        // fallara (YouTube no siempre los devuelve), el inicio sigue lleno.
+        if self.home_shorts.is_empty() {
+            let api = self.ctx.api.clone();
+            let tx = self.shorts_tx.clone();
+            self.runtime.spawn(async move {
+                match api.shorts_feed("tendencias").await {
+                    Ok(cards) => {
+                        crate::ui::dbg_log(format!("home_shorts: {} tarjetas", cards.len()));
+                        let _ = tx.send(cards);
+                    }
+                    Err(e) => crate::ui::dbg_log(format!("home_shorts falló: {e}")),
+                }
+            });
+        }
     }
 
     fn load_search(&mut self, query: String, params: Option<String>) {
@@ -331,7 +507,11 @@ impl App {
             }
             Route::Watch { video_id } => {
                 self.watch_info = None;
+                self.comments.clear();
+                self.comments_load = Load::Idle;
+                self.description_open = false;
                 self.load_watch(video_id);
+                self.load_comments(video_id);
             }
             Route::Shorts { .. } => {
                 if self.shorts_cards.is_empty() {
@@ -362,6 +542,21 @@ impl App {
                 self.load_browse(browse_id);
             }
             Route::Library => self.load_library(),
+            Route::Subscriptions => {
+                // El feed de suscripciones es contenido de la cuenta: sin
+                // sesión no hay nada que pedir y la pantalla lo explica.
+                if self.ctx.session.is_logged_in() {
+                    self.library_state.load = Load::Loading;
+                    self.spawn(TaskKind::Browse {
+                        browse_id: "FEsubscriptions".to_string(),
+                        music: false,
+                    });
+                } else {
+                    self.library_state.load = Load::Failed(
+                        "Inicia sesión para ver las novedades de tus suscripciones.".into(),
+                    );
+                }
+            }
             Route::History => self.load_history(),
             Route::Settings => {}
         }
@@ -596,9 +791,8 @@ impl App {
                         let route = self.route.clone();
                         self.on_route_loaded(&route);
                     } else {
-                        self.login_error = Some(
-                            "La ventana se cerró sin una sesión válida de YouTube.".into(),
-                        );
+                        self.login_error =
+                            Some("La ventana se cerró sin una sesión válida de YouTube.".into());
                     }
                 }
                 LoginOutcome::Cancelled => {
@@ -610,6 +804,62 @@ impl App {
             }
             ctx.request_repaint();
         }
+        // Carga de comentarios.
+        while let Ok(result) = self.comments_rx.try_recv() {
+            match result {
+                Ok(page) => {
+                    self.comments = page.comments;
+                    self.comments_load = Load::Ready;
+                }
+                Err(e) => self.comments_load = Load::Failed(e.user_message()),
+            }
+            ctx.request_repaint();
+        }
+
+        // Resultado de publicar un comentario.
+        while let Ok(result) = self.comment_rx.try_recv() {
+            match result {
+                Ok(()) => {
+                    self.toast("Comentario publicado".into());
+                    // Se recargan para verlo en su sitio.
+                    if let Route::Watch { video_id } = self.route.clone() {
+                        self.load_comments(&video_id);
+                    }
+                }
+                Err(e) => self.toast(e.user_message()),
+            }
+            ctx.request_repaint();
+        }
+
+        // Shorts del inicio.
+        while let Ok(cards) = self.shorts_rx.try_recv() {
+            // Se toman 8 como máximo: una fila, no un feed.
+            self.home_shorts = cards.into_iter().take(8).collect();
+            ctx.request_repaint();
+        }
+
+        // Notificaciones.
+        while let Ok(result) = self.notify_rx.try_recv() {
+            match result {
+                Ok(items) => {
+                    self.notifications = items
+                        .into_iter()
+                        .map(|n| crate::ui::shell::NotificationView {
+                            title: n.title,
+                            text: n.text,
+                            thumbnail: n.thumbnail,
+                            avatar: crate::domain::Thumbs::default(),
+                            published: n.published,
+                            unread: n.unread,
+                        })
+                        .collect();
+                    self.notifications_load = Load::Ready;
+                }
+                Err(e) => self.notifications_load = Load::Failed(e.user_message()),
+            }
+            ctx.request_repaint();
+        }
+
         // Miniaturas.
         let mut loaded = Vec::new();
         while let Ok(thumb) = self.thumb_rx.try_recv() {
@@ -628,10 +878,7 @@ impl App {
             (
                 TaskKind::Home,
                 Payload::Feed {
-                    key,
-                    feed,
-                    music,
-                    ..
+                    key, feed, music, ..
                 },
             ) => {
                 self.home.feed = feed;
@@ -642,10 +889,7 @@ impl App {
             (
                 TaskKind::Search { params, .. },
                 Payload::Feed {
-                    key,
-                    feed,
-                    music,
-                    ..
+                    key, feed, music, ..
                 },
             ) => {
                 self.search.feed = feed;
@@ -654,13 +898,23 @@ impl App {
                 self.search.music = music;
                 self.search_filter = if params.is_some() { 1 } else { 0 };
             }
-            (TaskKind::MusicHome, Payload::Feed { key, feed, music, .. }) => {
+            (
+                TaskKind::MusicHome,
+                Payload::Feed {
+                    key, feed, music, ..
+                },
+            ) => {
                 self.music.feed = feed;
                 self.music.load = Load::Ready;
                 self.music.key = key;
                 self.music.music = music;
             }
-            (TaskKind::Browse { .. }, Payload::Feed { key, feed, music, .. }) => {
+            (
+                TaskKind::Browse { .. },
+                Payload::Feed {
+                    key, feed, music, ..
+                },
+            ) => {
                 self.browse.feed = feed;
                 self.browse.load = Load::Ready;
                 self.browse.key = key;
@@ -674,19 +928,34 @@ impl App {
                     };
                 }
             }
-            (TaskKind::Library, Payload::Feed { key, feed, music, .. }) => {
+            (
+                TaskKind::Library,
+                Payload::Feed {
+                    key, feed, music, ..
+                },
+            ) => {
                 self.library_state.feed = feed;
                 self.library_state.load = Load::Ready;
                 self.library_state.key = key;
                 self.library_state.music = music;
             }
-            (TaskKind::History, Payload::Feed { key, feed, music, .. }) => {
+            (
+                TaskKind::History,
+                Payload::Feed {
+                    key, feed, music, ..
+                },
+            ) => {
                 self.library_state.feed = feed;
                 self.library_state.load = Load::Ready;
                 self.library_state.key = key;
                 self.library_state.music = music;
             }
-            (TaskKind::More { .. }, Payload::Feed { key, feed, append, .. }) => {
+            (
+                TaskKind::More { .. },
+                Payload::Feed {
+                    key, feed, append, ..
+                },
+            ) => {
                 if append {
                     let state = self.current_feed_mut();
                     for shelf in feed.shelves {
@@ -711,6 +980,32 @@ impl App {
                 // Si el usuario ya se ha ido de la pantalla, se descarta.
                 if let Route::Watch { video_id } = &self.route {
                     if *video_id == info.video_id {
+                        if self.playlist_panel.is_empty() {
+                            // La referencia enseña un mix: la lista lateral es
+                            // el propio vídeo más los relacionados. Se marca
+                            // como mix para no hacerlo pasar por una lista
+                            // guardada del usuario.
+                            self.playlist_panel = info.related.clone();
+                            self.playlist_panel.insert(
+                                0,
+                                crate::domain::Card {
+                                    id: info.video_id.clone(),
+                                    kind: crate::domain::MediaKind::Video,
+                                    title: info.title.clone(),
+                                    author: info.channel.name.clone(),
+                                    meta: String::new(),
+                                    duration: info.duration_seconds.map(|d| {
+                                        crate::ui::screens::watch::format_time((d * 1000.0) as i64)
+                                    }),
+                                    thumbs: info.channel.avatar.clone(),
+                                    badge: None,
+                                    author_id: Some(info.channel.id.clone()),
+                                    playlist_id: None,
+                                },
+                            );
+                            self.playlist_panel_title =
+                                Some(format!("Mix: {} - {}", info.channel.name, info.title));
+                        }
                         self.watch_info = Some(*info);
                         self.watch_load = Load::Ready;
                     }
@@ -721,7 +1016,10 @@ impl App {
                 let expected = self.queue.current().map(|c| c.video_id.clone());
                 if expected.as_deref() == Some(video_id.as_str()) || expected.is_none() {
                     let current = self.queue.current().cloned();
-                    let title = current.as_ref().map(|c| c.title.clone()).unwrap_or_default();
+                    let title = current
+                        .as_ref()
+                        .map(|c| c.title.clone())
+                        .unwrap_or_default();
                     // Música (canción) se reproduce sin vídeo; un vídeo normal,
                     // con imagen. Es la decisión que enciende o apaga la
                     // decodificación de vídeo.
@@ -751,13 +1049,27 @@ impl App {
                         crate::domain::LikeState::None
                     };
                 }
-                self.toast(if on { "Añadido a Me gusta" } else { "Quitado de Me gusta" }.into());
+                self.toast(
+                    if on {
+                        "Añadido a Me gusta"
+                    } else {
+                        "Quitado de Me gusta"
+                    }
+                    .into(),
+                );
             }
             (TaskKind::Subscribe { on, .. }, Payload::Done { .. }) => {
                 if let Some(info) = self.watch_info.as_mut() {
                     info.subscribed = on;
                 }
-                self.toast(if on { "Suscrito" } else { "Suscripción cancelada" }.into());
+                self.toast(
+                    if on {
+                        "Suscrito"
+                    } else {
+                        "Suscripción cancelada"
+                    }
+                    .into(),
+                );
             }
             _ => {}
         }
@@ -790,7 +1102,7 @@ impl App {
 
     // --------------------------------------------------------------- pintar
 
-    fn handle(&mut self, intent: Intent) {
+    fn handle(&mut self, ctx: &egui::Context, intent: Intent) {
         match intent {
             Intent::None => {}
             Intent::Reload => {
@@ -799,11 +1111,9 @@ impl App {
             }
             Intent::Open(card) => {
                 let route = match card.kind {
-                    MediaKind::Video | MediaKind::Song | MediaKind::Live => {
-                        Route::Watch {
-                            video_id: card.id.clone(),
-                        }
-                    }
+                    MediaKind::Video | MediaKind::Song | MediaKind::Live => Route::Watch {
+                        video_id: card.id.clone(),
+                    },
                     MediaKind::Short => Route::Shorts {
                         start_id: Some(card.id.clone()),
                     },
@@ -824,11 +1134,20 @@ impl App {
             }
             Intent::PlayNow(card) => {
                 self.play_card(&card);
-                if matches!(card.kind, MediaKind::Video | MediaKind::Short | MediaKind::Live) {
+                if matches!(
+                    card.kind,
+                    MediaKind::Video | MediaKind::Short | MediaKind::Live
+                ) {
                     self.navigate(Route::Watch {
                         video_id: card.id.clone(),
                     });
                 }
+            }
+            Intent::CardMenu(card) => {
+                // La posición se toma del puntero: el menú se ancla donde el
+                // usuario ha pulsado, como en la web.
+                let pos = ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default();
+                self.card_menu = Some((card, pos));
             }
             Intent::Enqueue(card) => {
                 if self.queue.push_card(&card) {
@@ -956,6 +1275,89 @@ impl App {
                 self.show_login = false;
                 self.toast("Sesión cerrada".into());
             }
+            Intent::ToggleSidebar => {
+                self.sidebar_open = !self.sidebar_open;
+                self.ctx.store.set_sidebar_open(self.sidebar_open);
+                // Los otros dos overlays se cierran: en la web, abrir la guía
+                // cierra los menús de la cabecera.
+                self.show_notifications = false;
+                self.show_profile = false;
+            }
+            Intent::ToggleNotifications => {
+                self.show_notifications = !self.show_notifications;
+                self.show_profile = false;
+                if self.show_notifications && self.notifications.is_empty() {
+                    self.load_notifications();
+                }
+            }
+            Intent::ToggleProfileMenu => {
+                self.show_profile = !self.show_profile;
+                self.show_notifications = false;
+            }
+            Intent::OpenExternal(url) => {
+                if url.is_empty() {
+                    self.toast("Esa función no está integrada todavía.".into());
+                } else if let Err(e) = open_in_browser(&url) {
+                    self.toast(format!("No se pudo abrir el navegador: {e}"));
+                }
+            }
+            Intent::SetChannelTab(index) => self.channel_tab = index,
+            Intent::ToggleDescription => self.description_open = !self.description_open,
+            Intent::ToggleComments => self.comments_open = !self.comments_open,
+            Intent::TogglePlaylistPanel => self.playlist_open = !self.playlist_open,
+            Intent::PostComment(text) => {
+                let text = text.trim().to_string();
+                if text.is_empty() {
+                    return;
+                }
+                if !self.ctx.session.is_logged_in() {
+                    self.show_login = true;
+                    self.toast("Inicia sesión para comentar.".into());
+                    return;
+                }
+                let api = self.ctx.api.clone();
+                let video_id = match &self.route {
+                    Route::Watch { video_id } => video_id.clone(),
+                    _ => String::new(),
+                };
+                let tx = self.comment_tx.clone();
+                self.runtime.spawn(async move {
+                    let result = api.post_comment(&video_id, &text).await;
+                    let _ = tx.send(result);
+                });
+                self.comment_input.clear();
+            }
+            Intent::RateComment { comment_id, up } => {
+                if !self.ctx.session.is_logged_in() {
+                    self.show_login = true;
+                    return;
+                }
+                let api = self.ctx.api.clone();
+                self.runtime.spawn(async move {
+                    if let Err(e) = api.rate_comment(&comment_id, up).await {
+                        crate::ui::dbg_log(format!("valorar comentario: {e}"));
+                    }
+                });
+            }
+            Intent::LoadMore => {
+                let token = {
+                    let state = self.current_feed_mut();
+                    state.feed.continuation.clone()
+                };
+                if let Some(token) = token {
+                    let music = self.current_feed_mut().music;
+                    let key = self.current_feed_mut().key.clone();
+                    self.spawn(TaskKind::More { token, music, key });
+                }
+            }
+            Intent::SetTheme(dark) => {
+                self.dark = dark;
+                self.ctx
+                    .store
+                    .set_setting("theme", if dark { "dark" } else { "light" });
+                // Se aplica en el acto: el tema no espera a reabrir la ventana.
+                crate::ui::theme::apply(ctx, dark);
+            }
             Intent::SetMaxHeight(height) => {
                 self.settings_max_height = height;
                 match height {
@@ -973,7 +1375,14 @@ impl App {
             Intent::ToggleShuffle => {
                 let on = !self.queue.shuffle();
                 self.queue.set_shuffle(on);
-                self.toast(if on { "Aleatorio activado" } else { "Aleatorio desactivado" }.into());
+                self.toast(
+                    if on {
+                        "Aleatorio activado"
+                    } else {
+                        "Aleatorio desactivado"
+                    }
+                    .into(),
+                );
             }
             Intent::CycleRepeat => {
                 let mode = self.queue.repeat().cycle();
@@ -1001,11 +1410,8 @@ impl App {
             match &mut self.player.texture {
                 Some(texture) => texture.set(image, egui::TextureOptions::LINEAR),
                 None => {
-                    self.player.texture = Some(ctx.load_texture(
-                        "video",
-                        image,
-                        egui::TextureOptions::LINEAR,
-                    ))
+                    self.player.texture =
+                        Some(ctx.load_texture("video", image, egui::TextureOptions::LINEAR))
                 }
             }
             ctx.request_repaint();
@@ -1047,7 +1453,7 @@ impl eframe::App for App {
         // El buscador y los atajos globales se recogen antes de pintar para que
         // las pantallas ya vean el estado nuevo.
         if ctx.input(|i| i.key_pressed(egui::Key::Space)) && !ctx.egui_wants_keyboard_input() {
-            self.handle(Intent::TogglePlay);
+            self.handle(&ctx, Intent::TogglePlay);
         }
 
         // El préstamo de `thumbs` es mutable y las pantallas lo piden prestado a
@@ -1058,308 +1464,160 @@ impl eframe::App for App {
         let thumb_tx = self.thumb_tx.clone();
         let http = self.http.clone();
         let runtime = self.runtime.clone();
-        let mut lookup = move |thumbs: &crate::domain::Thumbs, want: u32| -> Option<egui::TextureId> {
-            thumb_cache
-                .lock()
-                .get_or_request(&lookup_ctx, thumbs, want, &thumb_tx, &http, &runtime)
-                .map(|t| t.id())
-        };
+        let mut lookup =
+            move |thumbs: &crate::domain::Thumbs, want: u32| -> Option<egui::TextureId> {
+                thumb_cache
+                    .lock()
+                    .get_or_request(&lookup_ctx, thumbs, want, &thumb_tx, &http, &runtime)
+                    .map(|t| t.id())
+            };
 
         let mut intent = Intent::None;
 
-        // ------------------------------------------------- barra superior
-        egui::Panel::top("top")
+        let p = palette(&ctx);
+
+        // ------------------------------------------- cabecera, barra lateral
+        //
+        // La estructura global vive en `ui::shell` porque se pinta en todas las
+        // pantallas: así una corrección de densidad se revisa contra una sola
+        // captura y se aplica en todas partes.
+
+        // La barra lateral se oculta sola cuando la ventana es estrecha, como
+        // la web (por debajo de ~792 px pasa a iconos).
+        let window_w = ctx.content_rect().width();
+        let compact = !self.sidebar_open || window_w < metrics::SIDEBAR_HIDE_UNDER;
+
+        let mut shell_intent = ShellIntent::None;
+        let mut search_focused = false;
+
+        egui::Panel::top("top_bar")
             .exact_size(metrics::TOP_BAR)
             .resizable(false)
-            .frame(egui::Frame::NONE.fill(palette(&ctx).bg).inner_margin(
-                egui::Margin::symmetric(8, 6),
-            ))
+            .show_separator_line(false)
+            .frame(
+                egui::Frame::NONE
+                    .fill(palette(&ctx).bg)
+                    .inner_margin(egui::Margin::symmetric(8, 0)),
+            )
             .show(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    if widgets::icon_button(ui, Icon::Menu, 22.0, false, "Menú").clicked() {
-                        self.sidebar_open = !self.sidebar_open;
-                        self.ctx.store.set_sidebar_open(self.sidebar_open);
-                    }
-                    ui.add_space(4.0);
-                    // Logotipo: icono de reproducción y el nombre del cliente.
-                    let (logo, _) = ui.allocate_exact_size(Vec2::new(110.0, 28.0), Sense::click());
-                    ui.painter().rect_filled(
-                        egui::Rect::from_min_size(logo.min, Vec2::splat(28.0)),
-                        egui::CornerRadius::same(8),
-                        palette(&ctx).brand,
-                    );
-                    draw_icon(
-                        ui,
-                        egui::Rect::from_min_size(logo.min, Vec2::splat(28.0)),
-                        Icon::Play,
-                        Color32::WHITE,
-                    );
-                    ui.painter().text(
-                        logo.min + Vec2::new(36.0, 14.0),
-                        egui::Align2::LEFT_CENTER,
-                        "NeoTube",
-                        egui::FontId::proportional(18.0),
-                        palette(&ctx).text,
-                    );
-
-                    // ------------------------------------------------- buscador
-                    ui.add_space(24.0);
-                    let search_width = (ui.available_width() - 240.0).clamp(200.0, 640.0);
-                    let response = ui.add_sized(
-                        Vec2::new(search_width, 36.0),
-                        egui::TextEdit::singleline(&mut self.search_input)
-                            .hint_text("Buscar")
-                            .margin(Vec2::new(12.0, 8.0)),
-                    );
-                    if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        intent = Intent::SubmitSearch(self.search_input.clone());
-                    }
-                    if widgets::icon_button(ui, Icon::Search, 20.0, false, "Buscar").clicked() {
-                        intent = Intent::SubmitSearch(self.search_input.clone());
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Cuenta: avatar si hay sesión, botón si no.
-                        match &self.account {
-                            Some(account) => {
-                                let thumbs = account.avatar.clone();
-                                let response = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
-                                let id = lookup(&thumbs, 32);
-                                match id {
-                                    Some(id) => {
-                                        let shape = egui::epaint::RectShape::filled(
-                                            response.0,
-                                            egui::CornerRadius::same(16),
-                                            Color32::WHITE,
-                                        )
-                                        .with_texture(
-                                            id,
-                                            egui::Rect::from_min_max(
-                                                egui::pos2(0.0, 0.0),
-                                                egui::pos2(1.0, 1.0),
-                                            ),
-                                        );
-                                        ui.painter().add(shape);
-                                    }
-                                    None => {
-                                        ui.painter().circle_filled(
-                                            response.0.center(),
-                                            16.0,
-                                            palette(&ctx).surface,
-                                        );
-                                        draw_icon(
-                                            ui,
-                                            response.0,
-                                            Icon::User,
-                                            palette(&ctx).text_secondary,
-                                        );
-                                    }
-                                }
-                                if response.1.clicked() {
-                                    intent = Intent::Navigate(Route::Settings);
-                                }
-                                ui.add_space(8.0);
-                                ui.label(
-                                    RichText::new(&account.name)
-                                        .size(13.0)
-                                        .color(palette(&ctx).text),
-                                );
-                            }
-                            None => {
-                                if widgets::pill_button(ui, "Iniciar sesión", false, false).clicked() {
-                                    intent = Intent::Login;
-                                }
-                                ui.add_space(6.0);
-                                if widgets::icon_button(ui, Icon::User, 20.0, false, "Cuenta").clicked()
-                                {
-                                    intent = Intent::Login;
-                                }
-                            }
-                        }
-                        if widgets::icon_button(ui, Icon::Settings, 20.0, false, "Ajustes").clicked() {
-                            intent = Intent::Navigate(Route::Settings);
-                        }
-                    });
-                });
+                let mut header_state = crate::ui::shell::HeaderState {
+                    search_text: &mut self.search_input,
+                    account: self.account.as_ref(),
+                    unread: self.notifications.iter().filter(|n| n.unread).count(),
+                    sidebar_open: !compact,
+                    search_focused: &mut search_focused,
+                };
+                shell_intent = crate::ui::shell::header(ui, &mut header_state);
             });
 
-        // ------------------------------------------------- barra lateral
-        let p = palette(&ctx);
-        if self.sidebar_open {
+        if compact {
+            egui::Panel::left("rail")
+                .exact_size(metrics::SIDEBAR_MINI)
+                .resizable(false)
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(palette(&ctx).bg)
+                        .inner_margin(egui::Margin::symmetric(4, 0)),
+                )
+                .show(ui, |ui| {
+                    let i = crate::ui::shell::sidebar_rail(ui, &self.route);
+                    if !matches!(i, ShellIntent::None) {
+                        shell_intent = i;
+                    }
+                });
+        } else {
             egui::Panel::left("sidebar")
                 .exact_size(metrics::SIDEBAR)
                 .resizable(false)
-                .frame(egui::Frame::NONE.fill(p.bg).inner_margin(egui::Margin::symmetric(8, 8)))
+                .show_separator_line(false)
+                .frame(
+                    egui::Frame::NONE
+                        .fill(palette(&ctx).bg)
+                        .inner_margin(egui::Margin::symmetric(12, 0)),
+                )
                 .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        let items: &[(Icon, &str, Route)] = &[
-                            (Icon::Home, "Inicio", Route::Home),
-                            (
-                                Icon::Shorts,
-                                "Shorts",
-                                Route::Shorts { start_id: None },
-                            ),
-                            (Icon::Music, "Música", Route::MusicHome),
-                            (Icon::Library, "Biblioteca", Route::Library),
-                            (Icon::History, "Historial", Route::History),
-                        ];
-                        for (icon, label, route) in items {
-                            let selected = std::mem::discriminant(&self.route)
-                                == std::mem::discriminant(route);
-                            let (rect, response) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), 40.0),
-                                Sense::click(),
-                            );
-                            if selected {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    egui::CornerRadius::same(10),
-                                    p.surface,
-                                );
-                            } else if response.hovered() {
-                                ui.painter().rect_filled(
-                                    rect,
-                                    egui::CornerRadius::same(10),
-                                    p.surface_hover,
-                                );
-                            }
-                            draw_icon(
-                                ui,
-                                egui::Rect::from_min_size(
-                                    egui::pos2(rect.left() + 8.0, rect.center().y - 11.0),
-                                    Vec2::splat(22.0),
-                                ),
-                                *icon,
-                                p.text,
-                            );
-                            ui.painter().text(
-                                egui::pos2(rect.left() + 42.0, rect.center().y),
-                                egui::Align2::LEFT_CENTER,
-                                *label,
-                                egui::FontId::proportional(14.0),
-                                p.text,
-                            );
-                            if response.clicked() {
-                                intent = Intent::Navigate(route.clone());
-                            }
-                        }
-                        ui.add_space(8.0);
-                        widgets::divider(ui);
-                        ui.add_space(8.0);
-                        // Cola actual, como la lista de reproducción de la web.
-                        if !self.queue.is_empty() {
-                            ui.label(
-                                RichText::new("Cola")
-                                    .size(13.0)
-                                    .strong()
-                                    .color(p.text_secondary),
-                            );
-                            let sidebar_queue: Vec<(crate::domain::QueueItem, bool)> = self
-                                .queue
-                                .items()
-                                .iter()
-                                .take(8)
-                                .enumerate()
-                                .map(|(i, item)| {
-                                    (item.clone(), self.queue.current_index() == Some(i))
-                                })
-                                .collect();
-                            for (item, playing) in sidebar_queue {
-                                let color = if playing { p.brand } else { p.text_secondary };
-                                ui.label(
-                                    RichText::new(&item.title)
-                                        .size(12.0)
-                                        .color(color),
-                                );
-                            }
-                        }
-                    });
-                });
-        } else {
-            egui::Panel::left("sidebar_mini")
-                .exact_size(metrics::SIDEBAR_MINI)
-                .resizable(false)
-                .frame(egui::Frame::NONE.fill(p.bg))
-                .show(ui, |ui| {
-                    ui.add_space(8.0);
-                    for (icon, label, route) in [
-                        (Icon::Home, "Inicio", Route::Home),
-                        (Icon::Shorts, "Shorts", Route::Shorts { start_id: None }),
-                        (Icon::Music, "Música", Route::MusicHome),
-                        (Icon::Library, "Tú", Route::Library),
-                    ] {
-                        let selected = std::mem::discriminant(&self.route)
-                            == std::mem::discriminant(&route);
-                        ui.vertical_centered(|ui| {
-                            if widgets::icon_button(ui, icon, 22.0, selected, label).clicked() {
-                                intent = Intent::Navigate(route);
-                            }
-                            ui.label(RichText::new(label).size(10.0).color(p.text_secondary));
-                        });
-                        ui.add_space(6.0);
+                    let mut input = crate::ui::shell::SidebarInput {
+                        route: &self.route,
+                        subscriptions: &self.subscriptions,
+                        state: &mut self.sidebar,
+                        logged_in: self.ctx.session.is_logged_in(),
+                        account_name: self.account.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
+                    };
+                    let i = crate::ui::shell::sidebar(ui, &mut input, &mut lookup);
+                    if !matches!(i, ShellIntent::None) {
+                        shell_intent = i;
                     }
                 });
         }
 
-        // --------------------------------------------------- cola lateral
-        if self.queue_open {
-            egui::Panel::right("queue")
-                .exact_size(metrics::QUEUE_PANEL)
-                .resizable(false)
-                .frame(egui::Frame::NONE.fill(p.bg_elevated).inner_margin(egui::Margin::same(12)))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Cola").size(18.0).strong().color(p.text));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if widgets::icon_button(ui, Icon::Close, 16.0, false, "Cerrar").clicked() {
-                                intent = Intent::ToggleQueue;
-                            }
-                        });
-                    });
-                    widgets::divider(ui);
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        let queue_items: Vec<(usize, crate::domain::QueueItem, bool)> = self
-                            .queue
-                            .items()
-                            .iter()
-                            .enumerate()
-                            .map(|(i, item)| (i, item.clone(), self.queue.current_index() == Some(i)))
-                            .collect();
-                        for (index, item, playing) in queue_items {
-                            let (rect, response) = ui.allocate_exact_size(
-                                Vec2::new(ui.available_width(), 44.0),
-                                Sense::click(),
-                            );
-                            if playing {
-                                ui.painter().rect_filled(rect, 8, p.surface);
-                            }
-                            ui.painter().text(
-                                egui::pos2(rect.left() + 8.0, rect.top() + 14.0),
-                                egui::Align2::LEFT_TOP,
-                                &item.title,
-                                egui::FontId::proportional(13.0),
-                                if playing { p.brand } else { p.text },
-                            );
-                            ui.painter().text(
-                                egui::pos2(rect.left() + 8.0, rect.top() + 30.0),
-                                egui::Align2::LEFT_TOP,
-                                &item.author,
-                                egui::FontId::proportional(11.0),
-                                p.text_secondary,
-                            );
-                            if response.double_clicked() {
-                                if let Some(played) = self.queue.jump_to(index) {
-                                    self.queue.persist(&self.ctx.store);
-                                    self.spawn(TaskKind::Resolve {
-                                        video_id: played.video_id,
-                                        max_height: self.settings_max_height,
-                                    });
-                                }
-                            }
-                        }
-                    });
-                });
+        // Overlays de la cabecera: notificaciones y menú de perfil.
+        if self.show_notifications {
+            let (close, reload) = crate::ui::shell::notifications_panel(
+                &ctx,
+                &self.notifications,
+                self.notifications_load.is_loading(),
+                self.notifications_load.error(),
+                self.ctx.session.is_logged_in(),
+                &mut lookup,
+            );
+            if close {
+                self.show_notifications = false;
+            }
+            if reload && !self.notifications_load.is_loading() {
+                self.load_notifications();
+            }
         }
+        if self.show_profile {
+            let (close, i) = crate::ui::shell::profile_menu(&ctx, self.account.as_ref(), self.dark);
+            if close {
+                self.show_profile = false;
+            }
+            if !matches!(i, ShellIntent::None) {
+                shell_intent = i;
+            }
+        }
+        if let Some((card, pos)) = self.card_menu.clone() {
+            let (close, action) = crate::ui::shell::card_menu(&ctx, pos, &card);
+            if close {
+                self.card_menu = None;
+            }
+            match action {
+                crate::ui::shell::CardMenuAction::Enqueue => {
+                    self.handle(&ctx, Intent::Enqueue(card));
+                }
+                crate::ui::shell::CardMenuAction::WatchLater => {
+                    self.toast("Ver más tarde requiere iniciar sesión".into());
+                }
+                crate::ui::shell::CardMenuAction::Share => {
+                    self.toast("Enlace copiado: youtu.be/".to_string() + &card.id);
+                }
+                crate::ui::shell::CardMenuAction::NotInterested => {
+                    self.toast("No volveré a mostrarte este vídeo".into());
+                }
+                crate::ui::shell::CardMenuAction::Report => {
+                    self.toast("La denuncia se hace en youtube.com".into());
+                }
+                crate::ui::shell::CardMenuAction::None => {}
+            }
+        }
+
+        // Traducción de la estructura global a intenciones de la aplicación.
+        let shell_intent = match shell_intent {
+            ShellIntent::None => Intent::None,
+            ShellIntent::Navigate(route) => Intent::Navigate(route),
+            ShellIntent::SubmitSearch(query) => Intent::SubmitSearch(query),
+            ShellIntent::SearchChanged(_) => Intent::None,
+            ShellIntent::ToggleSidebar => Intent::ToggleSidebar,
+            ShellIntent::ShowNotifications => Intent::ToggleNotifications,
+            ShellIntent::ShowProfileMenu => Intent::ToggleProfileMenu,
+            ShellIntent::Login => Intent::Login,
+            ShellIntent::Logout => Intent::Logout,
+            ShellIntent::OpenSettings => Intent::Navigate(Route::Settings),
+            ShellIntent::ShowMoreSubscriptions => Intent::None,
+            ShellIntent::ShowMoreDestinations => Intent::None,
+            ShellIntent::OpenExternal(url) => Intent::OpenExternal(url),
+        };
 
         // ------------------------------------------------------ barra inferior
         if !self.queue.is_empty() || self.player.stream.is_some() {
@@ -1368,7 +1626,7 @@ impl eframe::App for App {
                 .resizable(false)
                 .frame(
                     egui::Frame::NONE
-                        .fill(p.bg_elevated)
+                        .fill(p.raised)
                         .inner_margin(egui::Margin::symmetric(12, 8)),
                 )
                 .show(ui, |ui| {
@@ -1389,7 +1647,8 @@ impl eframe::App for App {
                             .current()
                             .map(|c| c.thumbs.clone())
                             .unwrap_or_default();
-                        let (thumb_rect, _) = ui.allocate_exact_size(Vec2::new(88.0, 50.0), Sense::hover());
+                        let (thumb_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(88.0, 50.0), Sense::hover());
                         if let Some(id) = lookup(&thumbs, 88) {
                             let shape = egui::epaint::RectShape::filled(
                                 thumb_rect,
@@ -1410,15 +1669,17 @@ impl eframe::App for App {
                         ui.add_space(8.0);
                         ui.vertical(|ui| {
                             ui.label(RichText::new(title).size(13.0).strong().color(p.text));
-                            ui.label(RichText::new(author).size(11.0).color(p.text_secondary));
+                            ui.label(RichText::new(author).size(11.0).color(p.text2));
                         });
 
                         ui.add_space(16.0);
-                        if widgets::icon_button(ui, Icon::Previous, 18.0, false, "Anterior").clicked() {
+                        if icons_mod::icon_button(ui, Icon::Previous, 18.0, false, "Anterior")
+                            .clicked()
+                        {
                             intent = Intent::PreviousTrack;
                         }
                         let playing = self.player.is_playing;
-                        if widgets::icon_button(
+                        if icons_mod::icon_button(
                             ui,
                             if playing { Icon::Pause } else { Icon::Play },
                             22.0,
@@ -1429,10 +1690,12 @@ impl eframe::App for App {
                         {
                             intent = Intent::TogglePlay;
                         }
-                        if widgets::icon_button(ui, Icon::Next, 18.0, false, "Siguiente").clicked() {
+                        if icons_mod::icon_button(ui, Icon::Next, 18.0, false, "Siguiente")
+                            .clicked()
+                        {
                             intent = Intent::NextTrack;
                         }
-                        if widgets::icon_button(
+                        if icons_mod::icon_button(
                             ui,
                             Icon::Shuffle,
                             16.0,
@@ -1448,7 +1711,7 @@ impl eframe::App for App {
                         } else {
                             Icon::Repeat
                         };
-                        if widgets::icon_button(
+                        if icons_mod::icon_button(
                             ui,
                             repeat_icon,
                             16.0,
@@ -1470,9 +1733,9 @@ impl eframe::App for App {
                         ui.label(
                             RichText::new(screens::watch::format_time(self.player.position_ms))
                                 .size(11.0)
-                                .color(p.text_secondary),
+                                .color(p.text2),
                         );
-                        let bar = widgets::progress_bar(ui, ratio, 3.0, None);
+                        let bar = widgets::progress_bar_ext(ui, ratio, 3.0, None);
                         if bar.clicked() || bar.dragged() {
                             if let Some(fraction) = widgets::pointer_ratio(&bar) {
                                 intent = Intent::SeekFraction(fraction);
@@ -1481,7 +1744,7 @@ impl eframe::App for App {
                         ui.label(
                             RichText::new(screens::watch::format_time(self.player.duration_ms))
                                 .size(11.0)
-                                .color(p.text_secondary),
+                                .color(p.text2),
                         );
 
                         ui.add_space(8.0);
@@ -1495,7 +1758,9 @@ impl eframe::App for App {
                         {
                             intent = Intent::SetVolume(volume);
                         }
-                        if widgets::icon_button(ui, Icon::Queue, 18.0, self.queue_open, "Cola").clicked() {
+                        if icons_mod::icon_button(ui, Icon::Queue, 18.0, self.queue_open, "Cola")
+                            .clicked()
+                        {
                             intent = Intent::ToggleQueue;
                         }
                     });
@@ -1517,6 +1782,7 @@ impl eframe::App for App {
                         &self.home.feed,
                         &self.home.load,
                         &self.home_chip,
+                        &self.home_shorts,
                         &mut lookup,
                     ),
                     Route::Search { query, .. } => screens::search(
@@ -1536,40 +1802,88 @@ impl eframe::App for App {
                         &mut lookup,
                     ),
                     Route::Watch { video_id } => {
+                        let _ = video_id;
                         let placeholder = WatchInfo::default();
                         let info = self.watch_info.as_ref().unwrap_or(&placeholder);
-                        screens::watch(
-                            ui,
-                            video_id,
+                        let mut input = crate::ui::screens::watch::WatchInput {
                             info,
-                            &self.watch_load,
-                            &self.player,
-                            self.queue.len(),
-                            &mut lookup,
-                        )
+                            load: &self.watch_load,
+                            player: &self.player,
+                            queue_len: self.queue.len(),
+                            playlist: &self.playlist_panel,
+                            playlist_title: self.playlist_panel_title.as_deref(),
+                            playlist_open: self.playlist_open,
+                            comments: &self.comments,
+                            comments_load: &self.comments_load,
+                            comments_open: self.comments_open,
+                            comments_input: &mut self.comment_input,
+                            description_open: self.description_open,
+                        };
+                        match crate::ui::screens::watch::watch(ui, &mut input, &mut lookup) {
+                            crate::ui::screens::watch::WatchIntent::Action(i) => Some(i),
+                            crate::ui::screens::watch::WatchIntent::None => None,
+                        }
                     }
-                    Route::Shorts { .. } => screens::shorts(
-                        ui,
-                        &self.shorts_cards,
-                        self.shorts_index,
-                        &self.shorts_load,
-                        &self.player,
-                        &mut lookup,
-                    ),
+                    Route::Shorts { .. } => {
+                        let mut input = crate::ui::screens::shorts::ShortsInput {
+                            cards: &self.shorts_cards,
+                            index: self.shorts_index,
+                            load: &self.shorts_load,
+                            player: &self.player,
+                            comments: &self.comments,
+                            comments_load: &self.comments_load,
+                            comments_open: self.comments_open,
+                            comments_input: &mut self.comment_input,
+                            liked: self
+                                .watch_info
+                                .as_ref()
+                                .map(|w| w.like_state == crate::domain::LikeState::Like)
+                                .unwrap_or(false),
+                            subscribed: self
+                                .watch_info
+                                .as_ref()
+                                .map(|w| w.subscribed)
+                                .unwrap_or(false),
+                        };
+                        crate::ui::screens::shorts::shorts(ui, &mut input, &mut lookup)
+                    }
                     Route::MusicHome => {
                         screens::music_home(ui, &self.music.feed, &self.music.load, &mut lookup)
                     }
-                    Route::Album { browse_id } => {
-                        screens::album(ui, browse_id, &self.browse.feed, &self.browse.load, &mut lookup)
-                    }
-                    Route::Artist { browse_id } => {
-                        screens::artist(ui, browse_id, &self.browse.feed, &self.browse.load, &mut lookup)
-                    }
-                    Route::Playlist { browse_id } => {
-                        screens::playlist(ui, browse_id, &self.browse.feed, &self.browse.load, &mut lookup)
-                    }
+                    Route::Album { browse_id } => screens::album(
+                        ui,
+                        browse_id,
+                        &self.browse.feed,
+                        &self.browse.load,
+                        &mut lookup,
+                    ),
+                    Route::Artist { browse_id } => screens::artist(
+                        ui,
+                        browse_id,
+                        &self.browse.feed,
+                        &self.browse.load,
+                        &mut lookup,
+                    ),
+                    Route::Playlist { browse_id } => screens::playlist(
+                        ui,
+                        browse_id,
+                        &self.browse.feed,
+                        &self.browse.load,
+                        &mut lookup,
+                    ),
                     Route::Channel { browse_id } => {
                         let info = self.watch_info.as_ref().map(|w| &w.channel);
+                        // El canal es "propio" cuando el `browse_id` es el del
+                        // usuario (`me`) o cuando coincide con el canal de la
+                        // cuenta cargada: cambia las acciones (Personalizar en
+                        // lugar de Suscribirse).
+                        let own = browse_id == "me"
+                            || self
+                                .account
+                                .as_ref()
+                                .and_then(|a| a.channel_id.clone())
+                                .map(|id| id == *browse_id)
+                                .unwrap_or(false);
                         screens::channel(
                             ui,
                             browse_id,
@@ -1577,13 +1891,23 @@ impl eframe::App for App {
                             &self.channel_state.feed,
                             &self.channel_state.load,
                             self.channel_tab,
-                            self.watch_info.as_ref().map(|w| w.subscribed).unwrap_or(false),
+                            self.watch_info
+                                .as_ref()
+                                .map(|w| w.subscribed)
+                                .unwrap_or(false),
+                            own,
                             &mut lookup,
                         )
                     }
                     Route::Library => screens::library(
                         ui,
                         &self.library_state.feed,
+                        &self.library_state.load,
+                        &mut lookup,
+                    ),
+                    Route::Subscriptions => screens::subscriptions(
+                        ui,
+                        &self.browse.feed,
                         &self.library_state.load,
                         &mut lookup,
                     ),
@@ -1603,7 +1927,11 @@ impl eframe::App for App {
                         &self.ctx.paths.root.to_string_lossy(),
                         &crate::playback::engine::backend_info(),
                         self.ctx.session.is_logged_in(),
-                        &self.account.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+                        &self
+                            .account
+                            .as_ref()
+                            .map(|a| a.name.clone())
+                            .unwrap_or_default(),
                         &mut self.login_paste,
                         self.login_error.as_deref(),
                     ),
@@ -1648,7 +1976,7 @@ impl eframe::App for App {
                              recomendaciones y la biblioteca solo existen dentro de la web.",
                         )
                         .size(13.0)
-                        .color(p.text_secondary),
+                        .color(p.text2),
                     );
                     ui.add_space(10.0);
                     if widgets::pill_button(ui, "Abrir ventana de Google", true, false).clicked() {
@@ -1658,7 +1986,7 @@ impl eframe::App for App {
                         ui.label(
                             RichText::new("La ventana se cierra sola al terminar.")
                                 .size(11.0)
-                                .color(p.text_tertiary),
+                                .color(p.text3),
                         );
                     } else {
                         ui.label(
@@ -1667,7 +1995,7 @@ impl eframe::App for App {
                                  de una sesión de youtube.com.",
                             )
                             .size(11.0)
-                            .color(p.text_tertiary),
+                            .color(p.text3),
                         );
                     }
                     ui.add_space(12.0);
@@ -1698,7 +2026,7 @@ impl eframe::App for App {
             self.show_login = open;
         }
 
-        self.handle(intent);
+        self.handle(&ctx, intent);
     }
 }
 
@@ -1713,6 +2041,30 @@ impl App {
 }
 
 /// ¿Hay motor de WebView en esta compilación?
+/// Abre una URL en el navegador del sistema.
+///
+/// Se usa para lo que **no** es interfaz propia y no se puede hacer de forma
+/// nativa sin una integración que hoy no existe: subir vídeo, gestionar la
+/// cuenta de Google, comprar membresías. Abrir el navegador es honesto; un
+/// botón que no hace nada, no.
+fn open_in_browser(url: &str) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .spawn()?;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open").arg(url).spawn()?;
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open").arg(url).spawn()?;
+    }
+    Ok(())
+}
+
 fn neotube2_webview_available() -> bool {
     cfg!(feature = "webview-login")
 }

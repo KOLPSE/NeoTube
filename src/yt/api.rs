@@ -69,7 +69,8 @@ pub fn feed_from_json(json: &Value) -> Feed {
 
     // Se deduplica por (tipo, id) y no por puntero: el mismo vídeo puede venir
     // en el estante y otra vez suelto, y pintarlo dos veces es un fallo visible.
-    let mut vistos: std::collections::HashSet<(MediaKind, String)> = std::collections::HashSet::new();
+    let mut vistos: std::collections::HashSet<(MediaKind, String)> =
+        std::collections::HashSet::new();
     for (renderer, node) in shelves {
         let mut cards: Vec<Card> = Vec::new();
         for (name, item) in parse::collect_vec(node, parse::CARD_RENDERERS) {
@@ -129,7 +130,11 @@ pub fn feed_from_json(json: &Value) -> Feed {
 
 /// Igual que [`parse::collect`], pero para estantes: no entra en un estante ya
 /// recogido para no duplicar sus elementos.
-fn collect_shelves<'a>(node: &'a Value, wanted: &[&'static str], out: &mut Vec<(&'static str, &'a Value)>) {
+fn collect_shelves<'a>(
+    node: &'a Value,
+    wanted: &[&'static str],
+    out: &mut Vec<(&'static str, &'a Value)>,
+) {
     match node {
         Value::Object(map) => {
             for key in wanted {
@@ -184,10 +189,11 @@ impl Innertube {
             .await?;
         check_errors(&json)?;
         let mut feed = feed_from_json(&json);
-        let playable = feed
-            .shelves
-            .iter()
-            .any(|s| s.items.iter().any(|c| !c.thumbs.is_empty() || c.duration.is_some()));
+        let playable = feed.shelves.iter().any(|s| {
+            s.items
+                .iter()
+                .any(|c| !c.thumbs.is_empty() || c.duration.is_some())
+        });
         if !playable {
             // **La portada anónima ya no trae vídeos.** Sin sesión, YouTube
             // responde con un `richGridRenderer` que solo contiene un
@@ -304,7 +310,10 @@ impl Innertube {
     /// Suscribirse / darse de baja de un canal (`channelId` empieza por `UC…`).
     pub async fn set_subscribed(&self, channel_id: &str, on: bool) -> Result<(), ApiError> {
         let json = self
-            .post_web("subscription/subscribe", json!({ "channelIds": [channel_id] }))
+            .post_web(
+                "subscription/subscribe",
+                json!({ "channelIds": [channel_id] }),
+            )
             .await;
         if json.is_err() && on {
             // El endpoint de suscripción a veces solo acepta el estado completo
@@ -320,7 +329,10 @@ impl Innertube {
         }
         if !on {
             let json = self
-                .post_web("subscription/unsubscribe", json!({ "channelIds": [channel_id] }))
+                .post_web(
+                    "subscription/unsubscribe",
+                    json!({ "channelIds": [channel_id] }),
+                )
                 .await?;
             check_errors(&json)?;
         }
@@ -431,7 +443,11 @@ impl Innertube {
     /// Cola de reproducción de YouTube para un vídeo/canción: lo que el
     /// reproductor web usa para "siguiente". Es la única vía para las radios
     /// (`RD…`), que no responden por `browse`.
-    pub async fn music_queue(&self, video_id: &str, playlist_id: Option<&str>) -> Result<Vec<Card>, ApiError> {
+    pub async fn music_queue(
+        &self,
+        video_id: &str,
+        playlist_id: Option<&str>,
+    ) -> Result<Vec<Card>, ApiError> {
         let mut body = json!({
             "videoId": video_id,
             "isAudioOnly": true,
@@ -456,13 +472,25 @@ impl Innertube {
     /// un vídeo de partida.
     pub async fn shorts_feed(&self, seed_query: &str) -> Result<Vec<Card>, ApiError> {
         let json = self
-            .post_web("search", json!({ "query": format!("#shorts {seed_query}") }))
+            .post_web(
+                "search",
+                json!({ "query": format!("#shorts {seed_query}") }),
+            )
             .await?;
         check_errors(&json)?;
         let mut out = Vec::new();
-        for (name, item) in parse::collect_vec(&json, &["reelItemRenderer", "shortsLockupViewModel", "reelShelfRenderer"]) {
+        for (name, item) in parse::collect_vec(
+            &json,
+            &[
+                "reelItemRenderer",
+                "shortsLockupViewModel",
+                "reelShelfRenderer",
+            ],
+        ) {
             if name == "reelShelfRenderer" {
-                for (inner_name, inner) in parse::collect_vec(item, &["reelItemRenderer", "shortsLockupViewModel"]) {
+                for (inner_name, inner) in
+                    parse::collect_vec(item, &["reelItemRenderer", "shortsLockupViewModel"])
+                {
                     if let Some(card) = parse::card_from(inner_name, inner) {
                         out.push(card);
                     }
@@ -494,14 +522,25 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
 
     if let Some(primary) = parse::find_key(json, "videoPrimaryInfoRenderer") {
         info.title = parse::text_at(primary, &["title"]);
-        info.view_count = non_empty(parse::text_at(primary, &["viewCount", "videoViewCountRenderer", "viewCount"]));
+        info.view_count = non_empty(parse::text_at(
+            primary,
+            &["viewCount", "videoViewCountRenderer", "viewCount"],
+        ));
         if info.view_count.is_none() {
-            info.view_count = non_empty(parse::text_at(primary, &["viewCount", "videoViewCountRenderer", "shortViewCount"]));
+            info.view_count = non_empty(parse::text_at(
+                primary,
+                &["viewCount", "videoViewCountRenderer", "shortViewCount"],
+            ));
         }
         info.published = non_empty(parse::text_at(primary, &["dateText"]));
         let badge = parse::text_at(primary, &["badges"]);
         let _ = badge;
-        for b in primary.get("badges").and_then(|b| b.as_array()).into_iter().flatten() {
+        for b in primary
+            .get("badges")
+            .and_then(|b| b.as_array())
+            .into_iter()
+            .flatten()
+        {
             let label = parse::text_at(b, &["metadataBadgeRenderer", "label"]);
             if label.to_uppercase().contains("LIVE") || label.to_uppercase().contains("VIVO") {
                 info.is_live = true;
@@ -510,7 +549,10 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
     }
 
     if let Some(secondary) = parse::find_key(json, "videoSecondaryInfoRenderer") {
-        if let Some(owner) = secondary.get("owner").and_then(|o| parse::find_key(o, "videoOwnerRenderer")) {
+        if let Some(owner) = secondary
+            .get("owner")
+            .and_then(|o| parse::find_key(o, "videoOwnerRenderer"))
+        {
             info.channel.name = parse::text_at(owner, &["title"]);
             info.channel.avatar = parse::thumbs_of(owner);
             info.channel.subscribers = non_empty(parse::text_at(owner, &["subscriberCountText"]));
@@ -521,9 +563,8 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
                 .to_string();
             if info.channel.avatar.is_empty() {
                 if let Some(t) = owner.get("thumbnail") {
-                    info.channel.avatar = parse::thumbs_from_array(
-                        t.get("thumbnails").unwrap_or(&Value::Null),
-                    );
+                    info.channel.avatar =
+                        parse::thumbs_from_array(t.get("thumbnails").unwrap_or(&Value::Null));
                 }
             }
         }
@@ -531,7 +572,11 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
         // o como `description.runs` (antiguo).
         let attributed = parse::text_at(secondary, &["attributedDescription", "content"]);
         let runs = parse::text_at(secondary, &["description"]);
-        info.description = if attributed.trim().is_empty() { runs } else { attributed };
+        info.description = if attributed.trim().is_empty() {
+            runs
+        } else {
+            attributed
+        };
         if info.description.is_empty() {
             if let Some(d) = parse::find_key(secondary, "attributedDescription") {
                 info.description = parse::text_at(d, &["content"]);
@@ -551,7 +596,10 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
                 info.like_state = LikeState::Like;
             }
         }
-        info.likes_text = non_empty(parse::text_at(toggle, &["defaultText", "accessibility", "accessibilityData", "label"]));
+        info.likes_text = non_empty(parse::text_at(
+            toggle,
+            &["defaultText", "accessibility", "accessibilityData", "label"],
+        ));
     }
     for b in parse::collect_vec(json, &["subscribeButtonRenderer"]) {
         for sub in parse::collect_vec(b.1, &["subscribeButtonRenderer"]) {
@@ -574,7 +622,11 @@ pub fn watch_from_json(video_id: &str, json: &Value) -> WatchInfo {
         }
     }
     if let Some(toggle) = parse::find_key(json, "toggleButtonRenderer") {
-        if toggle.get("isToggled").and_then(|v| v.as_bool()).unwrap_or(false) {
+        if toggle
+            .get("isToggled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
             info.like_state = LikeState::Like;
         }
     }
@@ -739,7 +791,10 @@ mod tests {
         assert_eq!(info.title, "Un título");
         assert_eq!(info.channel.name, "Canal");
         assert_eq!(info.channel.id, "UC123");
-        assert_eq!(info.view_count.as_deref(), Some("1.234.567 visualizaciones"));
+        assert_eq!(
+            info.view_count.as_deref(),
+            Some("1.234.567 visualizaciones")
+        );
         assert_eq!(info.chapters.len(), 2);
     }
 }

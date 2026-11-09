@@ -269,7 +269,13 @@ impl Innertube {
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
-            .header("Accept-Language", format!("{}-{},{};q=0.9", self.locale.hl, self.locale.gl, self.locale.hl));
+            .header(
+                "Accept-Language",
+                format!(
+                    "{}-{},{};q=0.9",
+                    self.locale.hl, self.locale.gl, self.locale.hl
+                ),
+            );
 
         if authenticated {
             for (k, v) in self.auth_headers(origin) {
@@ -293,8 +299,8 @@ impl Innertube {
             .map_err(|e| ApiError::Network(e.to_string()))?;
 
         if status != 200 {
-            let snippet = String::from_utf8_lossy(&bytes[..bytes.len().min(400)])
-                .replace(['\n', '\r'], " ");
+            let snippet =
+                String::from_utf8_lossy(&bytes[..bytes.len().min(400)]).replace(['\n', '\r'], " ");
             return Err(match status {
                 401 | 403 => ApiError::NeedsLogin,
                 _ => ApiError::Http {
@@ -322,7 +328,11 @@ impl Innertube {
     }
 
     /// GET simple al host de YouTube (páginas HTML: solo para `visitorData`).
-    async fn get_text(&self, url: &str, headers: Vec<(String, String)>) -> Result<String, ApiError> {
+    async fn get_text(
+        &self,
+        url: &str,
+        headers: Vec<(String, String)>,
+    ) -> Result<String, ApiError> {
         let mut req = self.http.get(url);
         for (k, v) in headers {
             req = req.header(k, v);
@@ -337,7 +347,9 @@ impl Innertube {
                 body: String::new(),
             });
         }
-        res.text().await.map_err(|e| ApiError::Network(e.to_string()))
+        res.text()
+            .await
+            .map_err(|e| ApiError::Network(e.to_string()))
     }
 
     /// Identidad de visitante, cacheada 30 min. Sin ella `ANDROID_VR` contesta

@@ -322,6 +322,8 @@ pub enum Route {
     Channel { browse_id: String },
     Library,
     History,
+    /// Suscripciones: los vídeos nuevos de los canales a los que sigues.
+    Subscriptions,
     #[allow(dead_code)]
     Settings,
 }
@@ -353,6 +355,7 @@ impl Route {
             Route::Playlist { .. } => "Lista".into(),
             Route::Channel { .. } => "Canal".into(),
             Route::Library => "Biblioteca".into(),
+            Route::Subscriptions => "Suscripciones".into(),
             Route::History => "Historial".into(),
             Route::Settings => "Ajustes".into(),
         }

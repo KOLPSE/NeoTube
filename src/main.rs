@@ -18,7 +18,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1400.0, 900.0])
+            .with_inner_size([1920.0, 1040.0])
             .with_min_inner_size([720.0, 480.0])
             .with_title("NeoTube 2.0"),
         ..Default::default()

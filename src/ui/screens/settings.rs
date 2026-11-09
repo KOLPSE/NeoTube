@@ -48,18 +48,14 @@ pub fn settings(
 
             // --------------------------------------------------- reproducción
             section(ui, "Reproducción");
-            ui.label(
-                RichText::new("Calidad máxima")
-                    .size(14.0)
-                    .color(p.text),
-            );
+            ui.label(RichText::new("Calidad máxima").size(14.0).color(p.text));
             ui.label(
                 RichText::new(
                     "Limitar la calidad reduce CPU, GPU y datos. En música no se \
                      decodifica vídeo, así que esto solo afecta a los vídeos.",
                 )
                 .size(12.0)
-                .color(p.text_secondary),
+                .color(p.text2),
             );
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
@@ -71,7 +67,11 @@ pub fn settings(
             });
 
             ui.add_space(14.0);
-            ui.label(RichText::new(format!("Volumen: {:.0}%", volume)).size(14.0).color(p.text));
+            ui.label(
+                RichText::new(format!("Volumen: {:.0}%", volume))
+                    .size(14.0)
+                    .color(p.text),
+            );
             let mut value = volume;
             if ui
                 .add(egui::Slider::new(&mut value, 0.0..=100.0).show_value(false))
@@ -84,18 +84,10 @@ pub fn settings(
             section(ui, "Aspecto");
             ui.horizontal(|ui| {
                 if widgets::chip(ui, "Oscuro", dark).clicked() && !dark {
-                    intent = Some(Intent::None);
-                    // El cambio de tema se aplica en el siguiente fotograma
-                    // desde Ajustes para no reasignar estilos a mitad del
-                    // recorrido de widgets.
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::unique("neotube.set_theme"), "dark");
-                    });
+                    intent = Some(Intent::SetTheme(true));
                 }
                 if widgets::chip(ui, "Claro", !dark).clicked() && dark {
-                    ui.ctx().data_mut(|d| {
-                        d.insert_temp(egui::Id::unique("neotube.set_theme"), "light");
-                    });
+                    intent = Some(Intent::SetTheme(false));
                 }
             });
 
@@ -119,7 +111,7 @@ pub fn settings(
                 ui.label(
                     RichText::new("Sin sesión: solo se puede ver contenido público.")
                         .size(13.0)
-                        .color(p.text_secondary),
+                        .color(p.text2),
                 );
                 ui.add_space(6.0);
                 if pill_button(ui, "Iniciar sesión", true, false).clicked() {
@@ -182,7 +174,7 @@ pub fn settings(
                      aplicación (RUST_LOG=debug) lo dice.",
                 )
                 .size(12.0)
-                .color(p.text_secondary),
+                .color(p.text2),
             );
 
             // ---------------------------------------------------- atajos
@@ -194,7 +186,8 @@ pub fn settings(
                 ("Alt + →", "Adelante"),
                 ("↑ / ↓", "Navegar Shorts"),
             ] {
-                let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
                 ui.painter().text(
                     rect.left_center(),
                     egui::Align2::LEFT_CENTER,
@@ -207,7 +200,7 @@ pub fn settings(
                     egui::Align2::LEFT_CENTER,
                     action,
                     egui::FontId::proportional(13.0),
-                    p.text_secondary,
+                    p.text2,
                 );
             }
 
@@ -215,7 +208,7 @@ pub fn settings(
             ui.label(
                 RichText::new("NeoTube 2.0 · cliente independiente, sin relación con YouTube")
                     .size(11.0)
-                    .color(p.text_tertiary),
+                    .color(p.text3),
             );
             ui.add_space(30.0);
         });
@@ -234,16 +227,13 @@ fn section(ui: &mut egui::Ui, title: &str) {
 
 fn info_row(ui: &mut egui::Ui, label: &str, value: &str) {
     let p = palette(ui.ctx());
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(ui.available_width(), 22.0),
-        Sense::hover(),
-    );
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 22.0), Sense::hover());
     ui.painter().text(
         rect.left_center(),
         egui::Align2::LEFT_CENTER,
         label,
         egui::FontId::proportional(13.0),
-        p.text_secondary,
+        p.text2,
     );
     ui.painter().text(
         rect.right_center(),

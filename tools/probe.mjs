@@ -77,7 +77,7 @@ async function fetchText(url, { method = 'GET', headers = {}, json = null, timeo
     const res = await fetch(url, {
       method,
       headers,
-      body: json === null ? undefined : JSON.stringify(json),
+      ...(json === null ? {} : { body: JSON.stringify(json) }),
       signal: controller.signal,
       redirect: 'follow',
     });
@@ -277,6 +277,7 @@ const DROPPED_BRANCHES = new Set([
   'playerConfig',
   'storyboards',
   'annotations',
+  'playbackTracking',
 ]);
 const DROPPED_KEYS = new Set(['trackingParams', 'clickTrackingParams', 'loggingDirectives']);
 // Decoración de UI (menús de tres puntos, previews, snippets, avatares,
@@ -284,6 +285,8 @@ const DROPPED_KEYS = new Set(['trackingParams', 'clickTrackingParams', 'loggingD
 const DROPPED_DECORATION = new Set([
   'menu',
   'menus',
+  'menuButton',
+  'menuButtonA11yLabel',
   'menuOnTap',
   'menuOnTapA11yLabel',
   'richThumbnail',
@@ -303,8 +306,12 @@ const DROPPED_DECORATION = new Set([
   'impressionEndpoints',
 ]);
 
-const AD_HOST = /(^|\.)(doubleclick\.net|googleadservices\.com|googlesyndication\.com|google\.com\/pagead)$/i;
+const AD_HOST = /(^|\.)(doubleclick\.net|googleadservices\.com|googlesyndication\.com)$/i;
 const MEDIA_HOST = /(^|\.)googlevideo\.com$/i;
+// Arrays de metadatos escalares (no listas de items): se conservan completos
+// aunque superen el cupo de items, porque recortarlos pierde capacidades
+// declaradas por el servidor (idiomas de subtítulos, palabras clave).
+const KEEP_FULL_ARRAYS = new Set(['translationLanguages', 'keywords']);
 // Parámetros de seguimiento que se eliminan de las URLs (miniaturas): solo
 // `sqp` y `rs`; el resto de la URL se conserva tal cual.
 const TRACKING_PARAMS = ['sqp', 'rs'];
@@ -328,11 +335,12 @@ function cleanString(value, maxString) {
   return out.length > maxString ? `${out.slice(0, maxString)}…` : out;
 }
 
-function trimArray(items, state, depth) {
+function trimArray(items, state, depth, key) {
   const out = [];
+  const limit = KEEP_FULL_ARRAYS.has(key) ? Infinity : state.maxItems;
   let keptContinuation = false;
   for (const item of items) {
-    if (out.length < state.maxItems) {
+    if (out.length < limit) {
       out.push(trimResponse(item, state, depth + 1));
       continue;
     }
@@ -348,16 +356,16 @@ function trimArray(items, state, depth) {
   return out;
 }
 
-function trimResponse(node, state, depth = 0) {
+function trimResponse(node, state, depth = 0, key = null) {
   if (node === null || node === undefined) return node;
   if (typeof node === 'string') return cleanString(node, state.maxString);
   if (typeof node !== 'object') return node;
   if (depth > 30) return null;
-  if (Array.isArray(node)) return trimArray(node, state, depth);
+  if (Array.isArray(node)) return trimArray(node, state, depth, key);
   const out = {};
-  for (const [key, value] of Object.entries(node)) {
-    if (DROPPED_KEYS.has(key) || DROPPED_BRANCHES.has(key) || DROPPED_DECORATION.has(key)) continue;
-    out[key] = trimResponse(value, state, depth + 1);
+  for (const [childKey, value] of Object.entries(node)) {
+    if (DROPPED_KEYS.has(childKey) || DROPPED_BRANCHES.has(childKey) || DROPPED_DECORATION.has(childKey)) continue;
+    out[childKey] = trimResponse(value, state, depth + 1, childKey);
   }
   return out;
 }
@@ -374,7 +382,9 @@ function writeFixture(fileName, payload) {
   ]) {
     const state = { maxItems, maxString, droppedItems: 0 };
     const trimmed = trimResponse(payload, state);
-    const text = `${JSON.stringify(trimmed, null, 1)}\n`;
+    // JSON compacto: la indentación de 1 espacio inflaba ~50% y obligaba a
+    // recortar items reales para respetar el tope de 300 KB.
+    const text = `${JSON.stringify(trimmed)}\n`;
     const bytes = Buffer.byteLength(text);
     lastBytes = bytes;
     if (bytes < 290 * 1024) {
@@ -411,6 +421,13 @@ function playerFixturePayload(payload) {
       if (typeof streaming[key] === 'string') streaming[key] = `https://example.invalid/${key}`;
     }
   }
+  // Las pistas de subtítulos llevan una baseUrl firmada que caduca igual que
+  // las del media: se sustituye conservando idioma, nombre y tipo de pista.
+  for (const track of copy.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []) {
+    if (typeof track.baseUrl === 'string') {
+      track.baseUrl = `https://example.invalid/api/timedtext?v=${copy.videoDetails?.videoId ?? VIDEO_ID}&lang=${track.languageCode ?? ''}`;
+    }
+  }
   return copy;
 }
 
@@ -430,7 +447,7 @@ async function bootstrap() {
   const visitorData = html.match(/"visitorData":"([^"]+)"/)?.[1] ?? null;
   const clientVersion = html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/)?.[1] ?? null;
   const signatureTimestamp = html.match(/"STS":(\d+)/)?.[1] ?? null;
-  const cookies = page.setCookies.map((c) => c.split(';')[0]).filter((c) => c && !/^GPS=/.test(c));
+  const cookies = page.setCookies.map((c) => c.split(';')[0]).filter((c) => c && !c.startsWith('GPS='));
   const cookieHeader = [BASE_COOKIE, ...cookies].join('; ');
   log({
     probe: 'bootstrap',
@@ -593,7 +610,6 @@ async function probeSearch(ctx) {
     errors: payload.error ?? null,
   });
   ctx.state.searchContinuation = continuation?.token ?? null;
-  ctx.state.shortsShelfPath = shortsShelf ? `${SEARCH_ITEMS_PATH}[${items.indexOf(items.find((i) => i?.gridShelfViewModel))}].gridShelfViewModel` : null;
 
   // La mezcla de renderers depende de la intención de la consulta: con nombres
   // de creador aparecen channelRenderer y playlists, con "lofi hip hop" solo
@@ -840,13 +856,19 @@ function musicItemPreview(item) {
     .filter(Boolean);
   const browse = renderer.navigationEndpoint?.browseEndpoint;
   const watch = renderer.navigationEndpoint?.watchEndpoint;
+  // En las filas de canción el id no está en `navigationEndpoint`: vive en el
+  // botón de reproducción del overlay.
+  const play = renderer.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint;
+  const playWatch = play?.watchEndpoint;
   return {
     renderer: kind,
     title: textOf(renderer.title) ?? flexColumns[0] ?? null,
     subtitle: textOf(renderer.subtitle) ?? flexColumns[1] ?? null,
-    videoId: renderer.videoId ?? watch?.videoId ?? null,
+    videoId: renderer.videoId ?? watch?.videoId ?? renderer.playlistItemData?.videoId ?? playWatch?.videoId ?? null,
+    musicVideoType: playWatch?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType ?? null,
     browseId: browse?.browseId ?? null,
     pageType: browse?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType ?? null,
+    playlistId: play?.watchPlaylistEndpoint?.playlistId ?? null,
     itemCount: renderer.itemCount ?? null,
   };
 }
@@ -1040,7 +1062,7 @@ async function probeShorts(ctx) {
     paths: {
       gridShelfViewModel: findKeyPaths(searchJson, 'gridShelfViewModel', { limit: 1 }),
       shortsLockupViewModel: findKeyPaths(searchJson, 'shortsLockupViewModel', { limit: 1 }),
-      reelWatchEndpoint: findKeyPaths(searchJson, 'reelWatchEndpoint', { limit: 1 }),
+      reelWatchEndpoint: findKeyPaths(searchJson, 'reelWatchEndpoint', { limit: 1, maxDepth: 22 }),
     },
     errors: searchJson.error ?? null,
   });
@@ -1058,7 +1080,7 @@ async function probeShorts(ctx) {
     const step = await ytPost(ctx, 'reel/reel_watch_sequence', attempt.body);
     const json = parseJson(step);
     const entries = json?.entries ?? [];
-    const entryPaths = findKeyPaths(json ?? {}, 'reelWatchEndpoint', { limit: 1 });
+    const entryPaths = findKeyPaths(json ?? {}, 'reelWatchEndpoint', { limit: 1, maxDepth: 22 });
     if (json && entries.length) sequenceJson = json;
     log({
       probe: 'shorts',
@@ -1313,6 +1335,7 @@ async function probePlayerVisionos(ctx) {
     ['sin-cookie', noCookie],
     ['sin-signatureTimestamp', noSts],
   ]) {
+    const variantAdaptive = variant.json.streamingData?.adaptiveFormats ?? [];
     log({
       probe: 'player-visionos',
       step: `variant:${label}`,
@@ -1321,8 +1344,8 @@ async function probePlayerVisionos(ctx) {
       clientProfile: 'VISIONOS',
       status: variant.step.status,
       playabilityStatus: variant.json.playabilityStatus?.status ?? null,
-      adaptiveFormats: (variant.json.streamingData?.adaptiveFormats ?? []).length,
-      audioItags: (variant.json.streamingData?.adaptiveFormats ?? []).filter((f) => /^audio\//.test(f.mimeType ?? '')).map((f) => f.itag),
+      adaptiveFormats: variantAdaptive.length,
+      audioItags: variantAdaptive.filter((f) => /^audio\//.test(f.mimeType ?? '')).map((f) => f.itag),
     });
   }
 
@@ -1481,6 +1504,20 @@ async function probePlayerVr(ctx) {
 async function probeContinuations(ctx) {
   const cases = [];
 
+  // Si la sonda se ejecuta sola no existen los tokens de `next`: se piden aquí
+  // una vez para que `node tools/probe.mjs continuations` sea autonómo.
+  if (!ctx.state.nextContinuation || !ctx.state.commentsContinuation) {
+    const seed = await ytPost(ctx, 'next', { context: webContext(ctx), videoId: VIDEO_ID, contentCheckOk: true, racyCheckOk: true });
+    const seedJson = parseJson(seed) ?? {};
+    const relatedItems = getAt(seedJson, 'contents.twoColumnWatchNextResults.secondaryResults.secondaryResults.results') ?? [];
+    const resultsItems = getAt(seedJson, 'contents.twoColumnWatchNextResults.results.results.contents') ?? [];
+    ctx.state.nextContinuation ??= continuationTokenAt(relatedItems)?.token ?? null;
+    const commentIndex = resultsItems.findIndex((item) => item?.itemSectionRenderer?.sectionIdentifier === 'comment-item-section');
+    ctx.state.commentsContinuation ??=
+      resultsItems[commentIndex]?.itemSectionRenderer?.contents?.[0]?.continuationItemRenderer?.continuationEndpoint
+        ?.continuationCommand?.token ?? null;
+  }
+
   // (a) Página 2 de search: se reutiliza el token del paso `search` o se pide.
   let searchToken = ctx.state.searchContinuation ?? null;
   if (!searchToken) {
@@ -1545,30 +1582,56 @@ async function probeContinuations(ctx) {
     cases.push({ name: 'next-relacionados-pagina-2', status: 'sin token' });
   }
 
-  // (c) Comentarios: el token sale del panel de comentarios de `next`.
+  // (c) Comentarios: el token sale del bloque de comentarios de `next`. La
+  // respuesta llega en dos endpoints: cabecera y hebras. El texto y el autor de
+  // cada comentario no están en el renderer: viven en
+  // `frameworkUpdates.entityBatchUpdate.mutations[].payload.commentEntityPayload`.
   if (ctx.state.commentsContinuation) {
     const body = { context: webContext(ctx), continuation: ctx.state.commentsContinuation };
     const step = await ytPost(ctx, 'next', body);
     const json = parseJson(step) ?? {};
-    const itemsPath = findKeyPaths(json, 'continuationItems', { limit: 1 })[0] ?? null;
-    const items = itemsPath ? getAt(json, itemsPath) ?? [] : [];
+    const endpoints = json.onResponseReceivedEndpoints ?? [];
+    const threads =
+      endpoints.find((endpoint) => (endpoint?.reloadContinuationItemsCommand?.continuationItems ?? []).some((item) => item?.commentThreadRenderer))
+        ?.reloadContinuationItemsCommand?.continuationItems ?? [];
+    const thread = threads.find((item) => item?.commentThreadRenderer)?.commentThreadRenderer ?? null;
+    const commentEntity = (json.frameworkUpdates?.entityBatchUpdate?.mutations ?? [])
+      .map((mutation) => mutation?.payload?.commentEntityPayload)
+      .find(Boolean);
+    const nextThreadToken = continuationTokenAt(threads);
     cases.push({
       name: 'next-comentarios-pagina-1',
       method: 'POST',
       url: `${YT}/youtubei/v1/next?prettyPrint=false`,
       clientProfile: 'WEB',
-      requestBody: { context: 'WEB', continuation: 'token de comentarios' },
+      requestBody: { context: 'WEB', continuation: 'token de comment-item-section' },
       status: step.status,
       ms: step.ms,
       bytes: step.bytes,
-      paths: { continuationItems: itemsPath, commentThreadRenderer: findKeyPaths(json, 'commentThreadRenderer', { limit: 1 })[0] ?? null, commentViewModel: findKeyPaths(json, 'commentViewModel', { limit: 1 })[0] ?? null },
-      itemCount: items.length,
-      itemKinds: kindsOf(items),
-      firstComment: (() => {
-        const thread = collectByKey(json, 'commentThreadRenderer', { limit: 1 })[0];
-        const comment = thread?.comment?.commentViewModel;
-        return comment ? { commentId: comment.commentId ?? null, text: (comment.contentText?.content ?? comment.contentText?.runs?.map((r) => r.text).join('') ?? '').slice(0, 80) } : null;
-      })(),
+      paths: {
+        onResponseReceivedEndpoints: 'onResponseReceivedEndpoints[]',
+        commentThreadRenderer: 'onResponseReceivedEndpoints[N].reloadContinuationItemsCommand.continuationItems[M].commentThreadRenderer',
+        commentId: '…commentThreadRenderer.commentViewModel.commentViewModel.commentId',
+        commentText: 'frameworkUpdates.entityBatchUpdate.mutations[].payload.commentEntityPayload.properties.content.content',
+        commentAuthor: 'frameworkUpdates.entityBatchUpdate.mutations[].payload.commentEntityPayload.author.displayName',
+      },
+      endpointCount: endpoints.length,
+      endpointItemKinds: endpoints.map((endpoint) => kindsOf(endpoint?.reloadContinuationItemsCommand?.continuationItems ?? [])),
+      threadCount: threads.filter((item) => item?.commentThreadRenderer).length,
+      firstComment: thread
+        ? {
+            commentId: thread.commentViewModel?.commentViewModel?.commentId ?? null,
+            replyCount: thread.replies?.commentRepliesRenderer?.viewReplies?.buttonRenderer?.text?.runs?.[0]?.text ?? null,
+            entityCommentId: commentEntity?.properties?.commentId ?? null,
+            author: commentEntity?.author?.displayName ?? null,
+            text: (commentEntity?.properties?.content?.content ?? '').slice(0, 100),
+            publishedTime: commentEntity?.properties?.publishedTime ?? null,
+            likeCount: commentEntity?.toolbar?.likeCountNotliked ?? null,
+          }
+        : null,
+      nextThreadToken: nextThreadToken
+        ? { path: '…continuationItems[ultimo].continuationItemRenderer.continuationEndpoint.continuationCommand.token', tokenLength: nextThreadToken.token.length }
+        : null,
       errors: json.error ?? null,
     });
   } else {
@@ -1651,9 +1714,10 @@ async function main() {
     process.exit(2);
   }
   const started = new Date().toISOString();
+  const queue = name === 'all' ? Object.keys(PROBES) : [name];
   const ctx = { ...(await bootstrap()), state: {} };
-  if (name === 'all' || Object.keys(PROBES).includes(name)) {
-    // WEB_REMIX necesita su propia clientVersion; se detecta una sola vez.
+  if (queue.some((probeName) => probeName.startsWith('music-'))) {
+    // WEB_REMIX tiene su propia clientVersion; se detecta una sola vez.
     ctx.remixClientVersion = await detectRemixClientVersion(ctx);
   }
   log({
@@ -1661,11 +1725,10 @@ async function main() {
     step: 'context',
     started,
     webClientVersion: ctx.webClientVersion,
-    remixClientVersion: ctx.remixClientVersion,
+    remixClientVersion: ctx.remixClientVersion ?? null,
     signatureTimestamp: ctx.signatureTimestamp,
   });
 
-  const queue = name === 'all' ? Object.keys(PROBES) : [name];
   const failures = [];
   for (const probeName of queue) {
     const t0 = Date.now();
