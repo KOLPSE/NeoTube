@@ -18,11 +18,15 @@ path = "src/main.rs"
 default = []
 # Login con WebView real (WebView2 en Windows, WebKitGTK en Linux). Opcional
 # porque arrastra wry+tao y no hace falta para el pegado manual de cookies.
-webview-login = ["dep:wry", "dep:tao"]
+webview-login = ["dep:wry", "dep:winit"]
 
 [dependencies]
 wry = { version = "0.57", optional = true }
-tao = { version = "0.34", optional = true }
+# `winit` en lugar de `tao`: wry pide una ventana y un bucle de eventos, y el
+# `ApplicationHandler` de winit permite **salir** del bucle cuando el login
+# termina (con `tao` el `EventLoop::run` no vuelve nunca y la ventana se queda
+# abierta).
+winit = { version = "0.30", optional = true }
 eframe = { version = "0.37", default-features = false, features = [
     "wgpu",
     "default_fonts",
