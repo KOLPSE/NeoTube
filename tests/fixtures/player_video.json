@@ -1,0 +1,1449 @@
+{
+ "playabilityStatus": {
+  "status": "OK",
+  "playableInEmbed": true,
+  "miniplayer": {
+   "miniplayerRenderer": {
+    "playbackMode": "PLAYBACK_MODE_ALLOW"
+   }
+  },
+  "contextParams": "Q0FFU0FnZ0I="
+ },
+ "streamingData": {
+  "expiresInSeconds": "21540",
+  "formats": [
+   {
+    "itag": 18,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+    "bitrate": 444226,
+    "width": 640,
+    "height": 360,
+    "lastModified": "1766960953317159",
+    "quality": "medium",
+    "fps": 25,
+    "qualityLabel": "360p",
+    "projectionType": "RECTANGULAR",
+    "audioQuality": "AUDIO_QUALITY_LOW",
+    "approxDurationMs": "213089",
+    "audioSampleRate": "44100",
+    "audioChannels": 2,
+    "qualityOrdinal": "QUALITY_ORDINAL_360P"
+   }
+  ],
+  "adaptiveFormats": [
+   {
+    "itag": 313,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 18076636,
+    "width": 3840,
+    "height": 2160,
+    "initRange": {
+     "start": "0",
+     "end": "220"
+    },
+    "indexRange": {
+     "start": "221",
+     "end": "893"
+    },
+    "lastModified": "1766963492248817",
+    "contentLength": "358608461",
+    "quality": "hd2160",
+    "fps": 25,
+    "qualityLabel": "2160p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 13466333,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_2160P"
+   },
+   {
+    "itag": 401,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.12M.08\"",
+    "bitrate": 17400774,
+    "width": 3840,
+    "height": 2160,
+    "initRange": {
+     "start": "0",
+     "end": "700"
+    },
+    "indexRange": {
+     "start": "701",
+     "end": "1188"
+    },
+    "lastModified": "1766961226342025",
+    "contentLength": "240334643",
+    "quality": "hd2160",
+    "fps": 25,
+    "qualityLabel": "2160p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 9024958,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_2160P"
+   },
+   {
+    "itag": 271,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 8978328,
+    "width": 2560,
+    "height": 1440,
+    "initRange": {
+     "start": "0",
+     "end": "219"
+    },
+    "indexRange": {
+     "start": "220",
+     "end": "889"
+    },
+    "lastModified": "1766962756705951",
+    "contentLength": "151103346",
+    "quality": "hd1440",
+    "fps": 25,
+    "qualityLabel": "1440p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 5674177,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_1440P"
+   },
+   {
+    "itag": 400,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.12M.08\"",
+    "bitrate": 7755221,
+    "width": 2560,
+    "height": 1440,
+    "initRange": {
+     "start": "0",
+     "end": "700"
+    },
+    "indexRange": {
+     "start": "701",
+     "end": "1188"
+    },
+    "lastModified": "1766961246255689",
+    "contentLength": "122168277",
+    "quality": "hd1440",
+    "fps": 25,
+    "qualityLabel": "1440p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 4587618,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_1440P"
+   },
+   {
+    "itag": 137,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.640028\"",
+    "bitrate": 4334157,
+    "width": 1920,
+    "height": 1080,
+    "initRange": {
+     "start": "0",
+     "end": "741"
+    },
+    "indexRange": {
+     "start": "742",
+     "end": "1229"
+    },
+    "lastModified": "1766957926174250",
+    "contentLength": "80911999",
+    "quality": "hd1080",
+    "fps": 25,
+    "qualityLabel": "1080p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 3038377,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+   },
+   {
+    "itag": 248,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 1549172,
+    "width": 1920,
+    "height": 1080,
+    "initRange": {
+     "start": "0",
+     "end": "219"
+    },
+    "indexRange": {
+     "start": "220",
+     "end": "874"
+    },
+    "lastModified": "1766963494258902",
+    "contentLength": "30846580",
+    "quality": "hd1080",
+    "fps": 25,
+    "qualityLabel": "1080p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 1158339,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+   },
+   {
+    "itag": 399,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.08M.08\"",
+    "bitrate": 1594543,
+    "width": 1920,
+    "height": 1080,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766970905427393",
+    "contentLength": "30415996",
+    "quality": "hd1080",
+    "fps": 25,
+    "qualityLabel": "1080p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 1142170,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_1080P"
+   },
+   {
+    "itag": 136,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.4D401F\"",
+    "bitrate": 1058310,
+    "width": 1280,
+    "height": 720,
+    "initRange": {
+     "start": "0",
+     "end": "739"
+    },
+    "indexRange": {
+     "start": "740",
+     "end": "1227"
+    },
+    "lastModified": "1766958204135500",
+    "contentLength": "26455880",
+    "quality": "hd720",
+    "fps": 25,
+    "qualityLabel": "720p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 993461,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_720P"
+   },
+   {
+    "itag": 247,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 867871,
+    "width": 1280,
+    "height": 720,
+    "initRange": {
+     "start": "0",
+     "end": "219"
+    },
+    "indexRange": {
+     "start": "220",
+     "end": "860"
+    },
+    "lastModified": "1766962272813700",
+    "contentLength": "17686717",
+    "quality": "hd720",
+    "fps": 25,
+    "qualityLabel": "720p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 664165,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_720P"
+   },
+   {
+    "itag": 398,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.05M.08\"",
+    "bitrate": 1012348,
+    "width": 1280,
+    "height": 720,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766960928964543",
+    "contentLength": "17593076",
+    "quality": "hd720",
+    "fps": 25,
+    "qualityLabel": "720p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 660648,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_720P"
+   },
+   {
+    "itag": 135,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.4D401E\"",
+    "bitrate": 690764,
+    "width": 854,
+    "height": 480,
+    "initRange": {
+     "start": "0",
+     "end": "740"
+    },
+    "indexRange": {
+     "start": "741",
+     "end": "1228"
+    },
+    "lastModified": "1766958212394312",
+    "contentLength": "14103519",
+    "quality": "large",
+    "fps": 25,
+    "qualityLabel": "480p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 529610,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_480P"
+   },
+   {
+    "itag": 244,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 466632,
+    "width": 854,
+    "height": 480,
+    "initRange": {
+     "start": "0",
+     "end": "219"
+    },
+    "indexRange": {
+     "start": "220",
+     "end": "857"
+    },
+    "lastModified": "1766961781254744",
+    "contentLength": "9381481",
+    "quality": "large",
+    "fps": 25,
+    "qualityLabel": "480p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 352289,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_480P"
+   },
+   {
+    "itag": 397,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.04M.08\"",
+    "bitrate": 525728,
+    "width": 854,
+    "height": 480,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766961026797508",
+    "contentLength": "9874826",
+    "quality": "large",
+    "fps": 25,
+    "qualityLabel": "480p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 370815,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_480P"
+   },
+   {
+    "itag": 134,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.4D401E\"",
+    "bitrate": 450863,
+    "width": 640,
+    "height": 360,
+    "initRange": {
+     "start": "0",
+     "end": "740"
+    },
+    "indexRange": {
+     "start": "741",
+     "end": "1228"
+    },
+    "lastModified": "1766960771651324",
+    "contentLength": "8390921",
+    "quality": "medium",
+    "fps": 25,
+    "qualityLabel": "360p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 315092,
+    "highReplication": true,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_360P"
+   },
+   {
+    "itag": 243,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 288453,
+    "width": 640,
+    "height": 360,
+    "initRange": {
+     "start": "0",
+     "end": "219"
+    },
+    "indexRange": {
+     "start": "220",
+     "end": "857"
+    },
+    "lastModified": "1766962597390784",
+    "contentLength": "6014765",
+    "quality": "medium",
+    "fps": 25,
+    "qualityLabel": "360p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 225864,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_360P"
+   },
+   {
+    "itag": 396,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.01M.08\"",
+    "bitrate": 304466,
+    "width": 640,
+    "height": 360,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766958935473272",
+    "contentLength": "5685561",
+    "quality": "medium",
+    "fps": 25,
+    "qualityLabel": "360p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 213502,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_360P"
+   },
+   {
+    "itag": 133,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.4D4015\"",
+    "bitrate": 236224,
+    "width": 426,
+    "height": 240,
+    "initRange": {
+     "start": "0",
+     "end": "739"
+    },
+    "indexRange": {
+     "start": "740",
+     "end": "1227"
+    },
+    "lastModified": "1766961065074107",
+    "contentLength": "4310122",
+    "quality": "small",
+    "fps": 25,
+    "qualityLabel": "240p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 161852,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_240P"
+   },
+   {
+    "itag": 242,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 131647,
+    "width": 426,
+    "height": 240,
+    "initRange": {
+     "start": "0",
+     "end": "218"
+    },
+    "indexRange": {
+     "start": "219",
+     "end": "856"
+    },
+    "lastModified": "1766963772564266",
+    "contentLength": "2706929",
+    "quality": "small",
+    "fps": 25,
+    "qualityLabel": "240p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 101649,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_240P"
+   },
+   {
+    "itag": 395,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.00M.08\"",
+    "bitrate": 159709,
+    "width": 426,
+    "height": 240,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766960927930211",
+    "contentLength": "3095447",
+    "quality": "small",
+    "fps": 25,
+    "qualityLabel": "240p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 116239,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_240P"
+   },
+   {
+    "itag": 160,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"avc1.4D400C\"",
+    "bitrate": 109973,
+    "width": 256,
+    "height": 144,
+    "initRange": {
+     "start": "0",
+     "end": "738"
+    },
+    "indexRange": {
+     "start": "739",
+     "end": "1226"
+    },
+    "lastModified": "1766961162303498",
+    "contentLength": "2058142",
+    "quality": "tiny",
+    "fps": 25,
+    "qualityLabel": "144p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 77286,
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_144P"
+   },
+   {
+    "itag": 278,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/webm; codecs=\"vp9\"",
+    "bitrate": 68500,
+    "width": 256,
+    "height": 144,
+    "initRange": {
+     "start": "0",
+     "end": "217"
+    },
+    "indexRange": {
+     "start": "218",
+     "end": "854"
+    },
+    "lastModified": "1766962598503008",
+    "contentLength": "1540844",
+    "quality": "tiny",
+    "fps": 25,
+    "qualityLabel": "144p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 57861,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_144P"
+   },
+   {
+    "itag": 394,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "video/mp4; codecs=\"av01.0.00M.08\"",
+    "bitrate": 83289,
+    "width": 256,
+    "height": 144,
+    "initRange": {
+     "start": "0",
+     "end": "699"
+    },
+    "indexRange": {
+     "start": "700",
+     "end": "1187"
+    },
+    "lastModified": "1766961689433204",
+    "contentLength": "1505504",
+    "quality": "tiny",
+    "fps": 25,
+    "qualityLabel": "144p",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 56534,
+    "colorInfo": {
+     "primaries": "COLOR_PRIMARIES_BT709",
+     "transferCharacteristics": "COLOR_TRANSFER_CHARACTERISTICS_BT709",
+     "matrixCoefficients": "COLOR_MATRIX_COEFFICIENTS_BT709"
+    },
+    "approxDurationMs": "213040",
+    "qualityOrdinal": "QUALITY_ORDINAL_144P"
+   },
+   {
+    "itag": 139,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.5\"",
+    "bitrate": 50152,
+    "initRange": {
+     "start": "0",
+     "end": "731"
+    },
+    "indexRange": {
+     "start": "732",
+     "end": "1027"
+    },
+    "lastModified": "1766955925459591",
+    "contentLength": "1300631",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 48813,
+    "audioQuality": "AUDIO_QUALITY_LOW",
+    "approxDurationMs": "213159",
+    "audioSampleRate": "22050",
+    "audioChannels": 2,
+    "loudnessDb": 0.9899998,
+    "trackAbsoluteLoudnessLkfs": -13.01,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   },
+   {
+    "itag": 140,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "audio/mp4; codecs=\"mp4a.40.2\"",
+    "bitrate": 130677,
+    "initRange": {
+     "start": "0",
+     "end": "722"
+    },
+    "indexRange": {
+     "start": "723",
+     "end": "1018"
+    },
+    "lastModified": "1766955925572207",
+    "contentLength": "3449447",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 129502,
+    "highReplication": true,
+    "audioQuality": "AUDIO_QUALITY_MEDIUM",
+    "approxDurationMs": "213089",
+    "audioSampleRate": "44100",
+    "audioChannels": 2,
+    "loudnessDb": 0.9899998,
+    "trackAbsoluteLoudnessLkfs": -13.01,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   },
+   {
+    "itag": 249,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "bitrate": 49496,
+    "initRange": {
+     "start": "0",
+     "end": "258"
+    },
+    "indexRange": {
+     "start": "259",
+     "end": "628"
+    },
+    "lastModified": "1766955883595299",
+    "contentLength": "1231355",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 46234,
+    "audioQuality": "AUDIO_QUALITY_LOW",
+    "approxDurationMs": "213061",
+    "audioSampleRate": "48000",
+    "audioChannels": 2,
+    "loudnessDb": 0.97999954,
+    "trackAbsoluteLoudnessLkfs": -13.02,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   },
+   {
+    "itag": 251,
+    "url": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)",
+    "mimeType": "audio/webm; codecs=\"opus\"",
+    "bitrate": 136544,
+    "initRange": {
+     "start": "0",
+     "end": "258"
+    },
+    "indexRange": {
+     "start": "259",
+     "end": "629"
+    },
+    "lastModified": "1766955883819090",
+    "contentLength": "3433755",
+    "quality": "tiny",
+    "projectionType": "RECTANGULAR",
+    "averageBitrate": 128930,
+    "audioQuality": "AUDIO_QUALITY_MEDIUM",
+    "approxDurationMs": "213061",
+    "audioSampleRate": "48000",
+    "audioChannels": 2,
+    "loudnessDb": 0.97999954,
+    "trackAbsoluteLoudnessLkfs": -13.02,
+    "qualityOrdinal": "QUALITY_ORDINAL_UNKNOWN"
+   }
+  ],
+  "serverAbrStreamingUrl": "https://rr2---sn-vg5obxn25po-h5qee.googlevideo.com/videoplayback?…(signed-params-truncated)"
+ },
+ "playbackTracking": {
+  "videostatsPlaybackUrl": {
+   "baseUrl": "https://s.youtube.com/api/stats/playback",
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "videostatsDelayplayUrl": {
+   "baseUrl": "https://s.youtube.com/api/stats/delayplay",
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "videostatsWatchtimeUrl": {
+   "baseUrl": "https://s.youtube.com/api/stats/watchtime",
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "ptrackingUrl": {
+   "baseUrl": "https://www.youtube.com/ptracking",
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "qoeUrl": {
+   "baseUrl": "https://s.youtube.com/api/stats/qoe",
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "atrUrl": {
+   "baseUrl": "https://s.youtube.com/api/stats/atr",
+   "elapsedMediaTimeSeconds": 3,
+   "headers": [
+    {
+     "headerType": "USER_AUTH"
+    },
+    {
+     "headerType": "VISITOR_ID"
+    },
+    {
+     "headerType": "PLUS_PAGE_ID"
+    }
+   ]
+  },
+  "videostatsScheduledFlushWalltimeSeconds": [
+   10,
+   20,
+   30
+  ],
+  "videostatsDefaultFlushIntervalSeconds": 300
+ },
+ "captions": {
+  "playerCaptionsTracklistRenderer": {
+   "captionTracks": [
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Alemán (Alemania)"
+       }
+      ]
+     },
+     "vssId": ".de-DE",
+     "languageCode": "de-DE",
+     "isTranslatable": true,
+     "trackName": ""
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Español (Latinoamérica)"
+       }
+      ]
+     },
+     "vssId": ".es-419",
+     "languageCode": "es-419",
+     "isTranslatable": true,
+     "trackName": ""
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Inglés"
+       }
+      ]
+     },
+     "vssId": ".en",
+     "languageCode": "en",
+     "isTranslatable": true,
+     "trackName": ""
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Inglés (generados automáticamente)"
+       }
+      ]
+     },
+     "vssId": "a.en",
+     "languageCode": "en",
+     "kind": "asr",
+     "isTranslatable": true,
+     "trackName": ""
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Japonés"
+       }
+      ]
+     },
+     "vssId": ".ja",
+     "languageCode": "ja",
+     "isTranslatable": true,
+     "trackName": ""
+    },
+    {
+     "baseUrl": "https://www.youtube.com/api/timedtext",
+     "name": {
+      "runs": [
+       {
+        "text": "Portugués (Brasil)"
+       }
+      ]
+     },
+     "vssId": ".pt-BR",
+     "languageCode": "pt-BR",
+     "isTranslatable": true,
+     "trackName": ""
+    }
+   ],
+   "audioTracks": [
+    {
+     "captionTrackIndices": [
+      0,
+      1,
+      2,
+      4,
+      5,
+      3
+     ],
+     "defaultCaptionTrackIndex": 1,
+     "hasDefaultTrack": true,
+     "captionsInitialState": "CAPTIONS_INITIAL_STATE_ON_RECOMMENDED"
+    }
+   ],
+   "defaultAudioTrackIndex": 0
+  }
+ },
+ "videoDetails": {
+  "videoId": "dQw4w9WgXcQ",
+  "title": "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)",
+  "lengthSeconds": "213",
+  "keywords": [
+   "rick astley",
+   "Never Gonna Give You Up",
+   "nggyu",
+   "never gonna give you up lyrics",
+   "rick rolled",
+   "Rick Roll",
+   "rick astley official",
+   "rickrolled",
+   "Fortnite song",
+   "Fortnite event",
+   "Fortnite dance",
+   "fortnite never gonna give you up",
+   "rick roll",
+   "rickrolling",
+   "rick rolling",
+   "never gonna give you up",
+   "80s music",
+   "rick astley new",
+   "animated video",
+   "rickroll",
+   "meme songs",
+   "never gonna give u up lyrics",
+   "Rick Astley 2022",
+   "never gonna let you down",
+   "animated",
+   "rick rolls 2022",
+   "never gonna give you up karaoke"
+  ],
+  "channelId": "UCuAXFkgsw1L7xaCfnd5JJOw",
+  "isOwnerViewing": false,
+  "shortDescription": "The official video for “Never Gonna Give You Up” by Rick Astley. \n\nNever: The Autobiography 📚 OUT NOW! \nFollow this link to get your copy and listen to Rick’s ‘Never’ playlist ❤️ #RickAstleyNever\nhttps://linktr.ee/rickastleynever\n\n“Never Gonna Give You Up” was a global smash on its release in July 1987, topping the charts in 25 countries including Rick’s native UK and the US Billboard Hot 100.  I…(truncated)",
+  "isCrawlable": true,
+  "thumbnail": {
+   "thumbnails": [
+    {
+     "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/default.jpg",
+     "width": 120,
+     "height": 90
+    },
+    {
+     "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/mqdefault.jpg",
+     "width": 320,
+     "height": 180
+    },
+    {
+     "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg",
+     "width": 480,
+     "height": 360
+    },
+    {
+     "url": "https://i.ytimg.com/vi/dQw4w9WgXcQ/sddefault.jpg",
+     "width": 640,
+     "height": 480
+    }
+   ]
+  },
+  "allowRatings": true,
+  "viewCount": "1835365938",
+  "author": "Rick Astley",
+  "isPrivate": false,
+  "isUnpluggedCorpus": false,
+  "isLiveContent": false,
+  "isTvfilmVideo": false
+ },
+ "playerConfig": {
+  "audioConfig": {
+   "loudnessDb": 0.9899998,
+   "perceptualLoudnessDb": -13.01,
+   "enablePerFormatLoudness": true,
+   "trackAbsoluteLoudnessLkfs": -13.01,
+   "loudnessTargetLkfs": -14
+  },
+  "exoPlayerConfig": {
+   "useExoPlayer": true,
+   "useAdaptiveBitrate": true,
+   "maxInitialByteRate": 91136,
+   "minDurationForQualityIncreaseMs": 12000,
+   "maxDurationForQualityDecreaseMs": 9000,
+   "minDurationToRetainAfterDiscardMs": 21000,
+   "lowWatermarkMs": 15000,
+   "highWatermarkMs": 30000,
+   "lowPoolLoad": 0.8,
+   "highPoolLoad": 0.8,
+   "sufficientBandwidthOverhead": 0.75,
+   "bufferChunkSizeKb": 50,
+   "httpConnectTimeoutMs": 16000,
+   "httpReadTimeoutMs": 8000,
+   "numAudioSegmentsPerFetch": 1,
+   "numVideoSegmentsPerFetch": 2,
+   "minDurationForPlaybackStartMs": 2500,
+   "enableExoplayerReuse": false,
+   "useRadioTypeForInitialQualitySelection": true,
+   "blacklistFormatOnError": false,
+   "enableBandaidHttpDataSource": true,
+   "httpLoadTimeoutMs": 18000,
+   "canPlayHdDrm": true,
+   "videoBufferSegmentCount": 389,
+   "audioBufferSegmentCount": 38,
+   "useAbruptSplicing": false,
+   "minRetryCount": 10,
+   "minChunksNeededToPreferOffline": 2,
+   "secondsToMaxAggressiveness": 0,
+   "enableSurfaceviewResizeWorkaround": true,
+   "enableVp9IfThresholdsPass": false,
+   "matchQualityToViewportOnUnfullscreen": false,
+   "lowAudioQualityConnTypes": [
+    "MOBILE_CONNECTION_TYPE_CELLULAR_2G",
+    "MOBILE_CONNECTION_TYPE_CELLULAR_3G"
+   ],
+   "useDashForLiveStreams": true,
+   "enableLibvpxVideoTrackRenderer": false,
+   "lowAudioQualityBandwidthThresholdBps": 0,
+   "enableVariableSpeedPlayback": true,
+   "preferOnesieBufferedFormat": false,
+   "minimumBandwidthSampleBytes": 0,
+   "useDashForOtfAndCompletedLiveStreams": true,
+   "disableCacheAwareVideoFormatEvaluation": false,
+   "useLiveDvrForDashLiveStreams": true,
+   "cronetResetTimeoutOnRedirects": true,
+   "emitVideoDecoderChangeEvents": false,
+   "onesieVideoBufferLoadTimeoutMs": "0",
+   "onesieVideoBufferReadTimeoutMs": "0",
+   "libvpxEnableGl": false,
+   "enableVp9EncryptedIfThresholdsPass": false,
+   "enableOpus": true,
+   "usePredictedBuffer": false,
+   "maxReadAheadMediaTimeMs": 0,
+   "useMediaTimeCappedLoadControl": false,
+   "allowCacheOverrideToLowerQualitiesWithinRange": 0,
+   "allowDroppingUndecodedFrames": true,
+   "minDurationForPlaybackRestartMs": 5000,
+   "serverProvidedBandwidthHeader": "",
+   "liveOnlyPegStrategy": "LIVE_ONLY_PEG_STRATEGY_SEEK_ON_RESUME",
+   "enableRedirectorHostFallback": false,
+   "enableHighlyAvailableFormatFallbackOnPcr": false,
+   "recordTrackRendererTimingEvents": false,
+   "minErrorsForRedirectorHostFallback": 0,
+   "nonHardwareMediaCodecNames": [
+    "OMX.ffmpeg.vp9.decoder",
+    "OMX.google.vp9.decoder",
+    "c2.android.vp9.decoder",
+    "OMX.Intel.sw_vd.vp9",
+    "OMX.MTK.VIDEO.DECODER.SW.VP9",
+    "c2.mtk.sw.vp9.decoder",
+    "OMX.google.av1.decoder",
+    "c2.android.av1.decoder",
+    "OMX.sprd.av1.decoder",
+    "c2.android.av1-dav1d.decoder"
+   ],
+   "enableVp9IfInHardware": true,
+   "enableVp9EncryptedIfInHardware": true,
+   "useOpusMedAsLowQualityAudio": false,
+   "minErrorsForPcrFallback": 0,
+   "useStickyRedirectHttpDataSource": false,
+   "onlyVideoBandwidth": false,
+   "useRedirectorOnNetworkChange": false,
+   "enableMaxReadaheadAbrThreshold": true,
+   "cacheCheckDirectoryWritabilityOnce": false,
+   "predictorType": "PREDICTOR_TYPE_NEAREST_RANK",
+   "slidingPercentile": 0.5,
+   "slidingWindowSize": 12,
+   "maxFrameDropIntervalMs": 100,
+   "ignoreLoadTimeoutForFallback": false,
+   "serverBweMultiplier": 1,
+   "drmMaxKeyfetchDelayMs": 0,
+   "maxResolutionForWhiteNoise": 0,
+   "whiteNoiseRenderEffectMode": "RENDER_EFFECT_MODE_UNKNOWN",
+   "enableLibvpxHdr": false,
+   "enableCacheAwareStreamSelection": false,
+   "useExoCronetDataSource": true,
+   "whiteNoiseScale": 0,
+   "whiteNoiseOffset": 0,
+   "preventVideoFrameLaggingWithLibvpx": false,
+   "enableMediaCodecHdr": false,
+   "enableMediaCodecSwHdr": false,
+   "liveOnlyWindowChunks": 10,
+   "bearerMinDurationToRetainAfterDiscardMs": [
+    21000,
+    21000,
+    21000,
+    21000,
+    120000,
+    120000,
+    90000,
+    120000
+   ],
+   "forceWidevineL3": false,
+   "useAverageBitrate": false,
+   "useMedialibAudioTrackRendererForLive": true,
+   "useExoPlayerV2": true,
+   "logMediaRequestEventsToCsi": false,
+   "onesieFixNonZeroStartTimeFormatSelection": false,
+   "liveOnlyReadaheadStepSizeChunks": 1,
+   "liveOnlyBufferHealthHalfLifeSeconds": 60,
+   "liveOnlyMinBufferHealthRatio": 0.75,
+   "liveOnlyMinLatencyToSeekRatio": 3,
+   "manifestlessPartialChunkStrategy": "ANDROID_PARTIAL_CHUNK_STRATEGY_RETRY_RANGE_CHECK_LMT",
+   "ignoreViewportSizeWhenSticky": false,
+   "enableLibvpxFallback": false,
+   "disableLibvpxLoopFilter": false,
+   "enableVpxMediaView": false,
+   "hdrMinScreenBrightness": 0,
+   "hdrMaxScreenBrightnessThreshold": 0,
+   "onesieDataSourceAboveCacheDataSource": false,
+   "httpNonplayerLoadTimeoutMs": 72000,
+   "numVideoSegmentsPerFetchStrategy": "NUM_SEGMENTS_PER_FETCH_STRATEGY_LIMITED_DURATION",
+   "maxVideoDurationPerFetchMs": 12000,
+   "maxVideoEstimatedLoadDurationMs": -1,
+   "estimatedServerClockHalfLife": 5,
+   "estimatedServerClockStrictOffset": false,
+   "minReadAheadMediaTimeMs": 0,
+   "readAheadGrowthRate": 0,
+   "useDynamicReadAhead": false,
+   "useYtVodMediaSourceForV2": false,
+   "enableV2Gapless": false,
+   "useLiveHeadTimeMillis": false,
+   "allowTrackSelectionWithUpdatedVideoItagsForExoV2": true,
+   "maxAllowableTimeBeforeMediaTimeUpdateSec": 0,
+   "enableDynamicHdr": false,
+   "v2PerformEarlyStreamSelection": false,
+   "v2UsePlaybackStreamSelectionResult": false,
+   "v2MinTimeBetweenAbrReevaluationMs": 2000,
+   "avoidReusePlaybackAcrossLoadvideos": false,
+   "reportExoPlayerStateOnTransition": false,
+   "manifestlessSequenceMethod": "MANIFESTLESS_SEQUENCE_METHOD_LIVE_HEAD",
+   "useLiveHeadWindow": false,
+   "enableDynamicHdrInHardware": false,
+   "ultralowAudioQualityBandwidthThresholdBps": 0,
+   "retryLiveNetNocontentWithDelay": true,
+   "ignoreUnneededSeeksToLiveHead": false,
+   "drmMetricsQoeLoggingFraction": 0.01,
+   "liveNetNocontentMaximumErrors": 10,
+   "slidingPercentileScalar": 1,
+   "minAdaptiveVideoQuality": 0,
+   "retryLiveEmptyChunkWithDelay": true,
+   "platypusBackBufferDurationMs": 30000,
+   "platypusEnableServerSideFormatFiltering": true
+  },
+  "networkProtocolConfig": {
+   "useQuic": true
+  },
+  "androidNetworkStackConfig": {
+   "networkStack": "CRONET",
+   "androidMetadataNetworkConfig": {
+    "coalesceRequests": true
+   }
+  },
+  "androidMedialibConfig": {
+   "isItag18MainProfile": true,
+   "viewportSizeFraction": 0.85
+  },
+  "variableSpeedConfig": {
+   "availablePlaybackSpeeds": [
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "×0,25"
+       }
+      ]
+     },
+     "value": 0.25
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "×0,5"
+       }
+      ]
+     },
+     "value": 0.5
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "×0,75"
+       }
+      ]
+     },
+     "value": 0.75
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "Normal"
+       }
+      ]
+     },
+     "value": 1
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "×1,25"
+       }
+      ]
+     },
+     "value": 1.25
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "×1,5"
+       }
+      ]
+     },
+     "value": 1.5
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "x1,75"
+       }
+      ]
+     },
+     "value": 1.75
+    },
+    {
+     "label": {
+      "runs": [
+       {
+        "text": "x2"
+       }
+      ]
+     },
+     "value": 2
+    }
+   ],
+   "androidVariableSpeedTimeoutSecs": 0,
+   "enableVariableSpeedOnOtf": true
+  },
+  "decodeQualityConfig": {
+   "maximumVideoDecodeVerticalResolution": 4320
+  },
+  "vrConfig": {
+   "allowVr": true,
+   "allowSubtitles": true,
+   "showHqButton": true,
+   "sphericalDirectionLoggingEnabled": true,
+   "enableAndroidVr180MagicWindow": true
+  },
+  "androidPlayerStatsConfig": {
+   "usePblForAttestationReporting": false,
+   "usePblForHeartbeatReporting": false,
+   "usePblForPlaybacktrackingReporting": false,
+   "usePblForQoeReporting": true,
+   "changeCpnOnFatalPlaybackError": true
+  },
+  "retryConfig": {
+   "retryEligibleErrors": [
+    "fmt.decode",
+    "android.exo.fatal",
+    "scripted_player.js.fatal",
+    "android.stuck.bufferfull",
+    "player.timeout",
+    "android.audiotrack"
+   ],
+   "retryUnderSameConditionAttempts": 1,
+   "retryWithNewSurfaceAttempts": 1,
+   "progressiveFallbackOnNonNetworkErrors": true,
+   "l3FallbackOnDrmErrors": true,
+   "retryAfterCacheRemoval": true,
+   "widevineL3EnforcedFallbackOnDrmErrors": true,
+   "exoProxyableFormatFallback": true,
+   "maxPlayerRetriesWhenNetworkUnavailable": 2,
+   "suppressFatalErrorAfterStop": false,
+   "fallbackToSwDecoderOnFormatDecodeError": true,
+   "disableFallbackToCabrOnClientErrors": [
+    "fmt.decode",
+    "android.audiotrack",
+    "fmt.unparseable",
+    "player.exception",
+    "player.fatalexception"
+   ]
+  },
+  "cmsPathProbeConfig": {
+   "cmsPathProbeDelayMs": 0
+  },
+  "mediaCommonConfig": {
+   "dynamicReadaheadConfig": {
+    "maxReadAheadMediaTimeMs": 120000,
+    "minReadAheadMediaTimeMs": 15000,
+    "readAheadGrowthRateMs": 1000,
+    "readAheadWatermarkMarginRatio": 0,
+    "minReadAheadWatermarkMarginMs": 0,
+    "maxReadAheadWatermarkMarginMs": 0,
+    "shouldIncorporateNetworkActiveState": false
+   },
+   "mediaUstreamerRequestConfig": {
+    "enableVideoPlaybackRequest": true,
+    "videoPlaybackUstreamerConfig": "Ct8HCqwECAAQgAoY0AUlMZkqPi1mZmY_NT0Klz9yBAoAGACoAQDgAQHoAQP5AQAAAAAAANA_gQIAAAAAAAAYQLgCAdoCchCw6gEYsOoBIKCcASjYNnCIJ4AB9APgAQOYAgzQAgLYAgHoAgKAAwKIA4gnqAMDsAMBuAMBwAMByAMBgAQB0AQB-AQHgAV9mAUBwAUB4AXQD_gF0A-AB5BOnQgAAIC_oAjoB-AIAegI____________AfoCN4UCmpkZPo0CAACAP8ACjwGdAwrXIz3VBAAAgD-9BjMzg0DIBwHlBwCACUTwBwGACAHYCQHgCQGoAwGwAwPQAwHYAwHgA5BOsAQBygQeChMIwKkHEJh1GOgHJQAAAAAoADAAEODUAxjQDzAB0gQKCgYI…(truncated)",
+    "videoPlaybackPostEmptyBody": false,
+    "isVideoPlaybackRequestIdempotent": true
+   },
+   "predictedReadaheadConfig": {
+    "minReadaheadMs": 5000,
+    "maxReadaheadMs": 157000
+   },
+   "mediaFetchRetryConfig": {
+    "initialDelayMs": 1000,
+    "backoffFactor": 1.3,
+    "maximumDelayMs": 20000,
+    "jitterFactor": 0.1
+   },
+   "mediaFetchMaximumServerErrors": 10,
+   "mediaFetchMaximumNetworkErrors": -1,
+   "mediaFetchMaximumErrors": 10,
+   "serverReadaheadConfig": {
+    "nextRequestPolicy": {
+     "targetAudioReadaheadMs": 120000,
+     "targetVideoReadaheadMs": 120000
+    }
+   },
+   "useServerDrivenAbr": true,
+   "sabrClientConfig": {
+    "defaultBackOffTimeMs": 0,
+    "enableHostFallback": true,
+    "primaryProbingDelayMs": 5000,
+    "maxFailureAttemptsBeforeFallback": 2
+   },
+   "serverPlaybackStartConfig": {
+    "enable": true,
+    "playbackStartPolicy": {
+     "startMinReadaheadPolicy": [
+      {
+       "minReadaheadMs": 1500
+      }
+     ]
+    }
+   },
+   "usePlatypus": true,
+   "mediaCacheConfig": {
+    "cacheLoadPolicy": {
+     "readaheadThresholdMs": 60000
+    }
+   },
+   "bandwidthEstimationConfig": {
+    "nearestRankConfig": {
+     "slidingWindowSize": 12,
+     "percentile": 0.25,
+     "scalar": 0.91
+    }
+   },
+   "platypusUseEnvoyNetFetch": false,
+   "fixLivePlaybackModelDefaultPosition": true
+  },
+  "taskCoordinatorConfig": {
+   "prefetchCoordinatorBufferedPositionMillisRelease": 0,
+   "prefetchCoordinatorBufferedPositionMillisPause": 0
+  }
+ },
+ "storyboards": {
+  "playerStoryboardSpecRenderer": {
+   "spec": "https://i.ytimg.com/sb/dQw4w9WgXcQ/storyboard3_L$L/$N.jpg",
+   "recommendedLevel": 2
+  }
+ },
+ "attestation": {
+  "playerAttestationRenderer": {
+   "challenge": "a=6&a2=1&b=raRrr1xVI9JpmsKvdPHlXsZfls4&c=1794226218&d=28&e=dQw4w9WgXcQ&c9a=1&hh=sUp5_PNAMJGStfL74QN5YCmntWptM8bmt_v_Grv_IpA",
+   "useSharedChallenge": true
+  }
+ },
+ "adBreakHeartbeatParams": "Q0FBJTNE"
+}

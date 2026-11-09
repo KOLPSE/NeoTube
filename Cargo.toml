@@ -1,0 +1,67 @@
+[package]
+name = "neotube2"
+version = "2.0.0"
+edition = "2021"
+rust-version = "1.82"
+description = "Cliente nativo de escritorio de YouTube y YouTube Music"
+license-file = "LICENSE"
+
+[lib]
+name = "neotube2"
+path = "src/lib.rs"
+
+[[bin]]
+name = "neotube2"
+path = "src/main.rs"
+
+[features]
+default = []
+# Login con WebView real (WebView2 en Windows, WebKitGTK en Linux). Opcional
+# porque arrastra wry+tao y no hace falta para el pegado manual de cookies.
+webview-login = ["dep:wry", "dep:tao"]
+
+[dependencies]
+wry = { version = "0.57", optional = true }
+tao = { version = "0.34", optional = true }
+eframe = { version = "0.37", default-features = false, features = [
+    "wgpu",
+    "default_fonts",
+    "wayland",
+    "x11",
+] }
+egui = "0.37"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+reqwest = { version = "0.13", default-features = false, features = [
+    "json",
+    "rustls",
+    "rustls-native-certs",
+    "gzip",
+    "brotli",
+    "stream",
+    "http2",
+    "charset",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.41", features = ["bundled"] }
+sha1 = "0.11"
+libloading = "0.9"
+anyhow = "1"
+thiserror = "2"
+parking_lot = "0.12"
+regex = "1"
+urlencoding = "2"
+directories = "6"
+sys-locale = "0.3"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 1
